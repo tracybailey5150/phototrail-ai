@@ -47,9 +47,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     previewUrl = prevData?.publicUrl || null;
   }
 
+  // Get location and timestamp data
+  const { data: location } = await admin.from('media_locations')
+    .select('*')
+    .eq('media_item_id', id)
+    .single();
+
+  const { data: timestamp } = await admin.from('media_timestamps')
+    .select('*')
+    .eq('media_item_id', id)
+    .single();
+
   return NextResponse.json({
     item,
     jobs: jobs || [],
+    location: location || null,
+    timestamp: timestamp || null,
     urls: { original: originalUrl, thumbnail: thumbnailUrl, preview: previewUrl },
   });
 }

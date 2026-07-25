@@ -122,6 +122,49 @@ export interface ProcessingJob {
   created_at: string;
 }
 
+export interface MediaLocation {
+  id: string;
+  media_item_id: string;
+  org_id: string;
+  raw_latitude: number | null;
+  raw_longitude: number | null;
+  resolved_latitude: number | null;
+  resolved_longitude: number | null;
+  location_source: string | null;
+  confidence: number | null;
+  verification_status: string;
+  place_name: string | null;
+  landmark: string | null;
+  street_address: string | null;
+  city: string | null;
+  state_province: string | null;
+  postal_code: string | null;
+  country: string | null;
+  country_code: string | null;
+  neighborhood: string | null;
+  timezone: string | null;
+  utc_offset_minutes: number | null;
+  geocode_provider: string | null;
+  resolution_explanation: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MediaTimestamp {
+  id: string;
+  media_item_id: string;
+  org_id: string;
+  best_capture_time: string | null;
+  capture_time_source: string | null;
+  capture_time_confidence: number | null;
+  capture_local_time: string | null;
+  capture_timezone: string | null;
+  resolution_explanation: string | null;
+  needs_review: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ActivityEvent {
   id: string;
   org_id: string;

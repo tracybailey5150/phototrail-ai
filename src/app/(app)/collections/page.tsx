@@ -65,7 +65,13 @@ export default function CollectionsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {collections.map((c) => (
             <Link key={c.id} href={`/collections/${c.id}`}>
-              <Card className="hover:border-zinc-700 transition-colors cursor-pointer h-full">
+              <Card className="hover:border-zinc-700 transition-colors cursor-pointer h-full" padding={false}>
+                {c.cover_image_url && (
+                  <div style={{ width: '100%', height: 160, overflow: 'hidden', borderTopLeftRadius: 12, borderTopRightRadius: 12 }}>
+                    <img src={c.cover_image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                  </div>
+                )}
+                <div className="p-5">
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <Badge variant={c.mode === 'travel' ? 'travel' : 'project'}>
@@ -83,6 +89,7 @@ export default function CollectionsPage() {
                   )}
                   {c.mode === 'project' && c.client_name && <p>{c.client_name}</p>}
                   {c.mode === 'project' && c.site_address && <p>{c.site_address}</p>}
+                </div>
                 </div>
               </Card>
             </Link>

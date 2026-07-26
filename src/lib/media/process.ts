@@ -143,6 +143,17 @@ export async function processMediaItem(mediaItemId: string): Promise<ProcessResu
       }).eq('id', mediaItemId);
 
       await updateStep(admin, mediaItemId, item.org_id, 'thumbnails', 'completed');
+
+      // Set as collection cover if none exists yet
+      const { data: coll } = await admin.from('collections')
+        .select('cover_image_url')
+        .eq('id', item.collection_id)
+        .single();
+      if (coll && !coll.cover_image_url) {
+        await admin.from('collections').update({
+          cover_image_url: `https://wwnvebnfjeemaakieqei.supabase.co/storage/v1/object/public/derivatives/${thumbPath}`,
+        }).eq('id', item.collection_id);
+      }
     } else {
       await updateStep(admin, mediaItemId, item.org_id, 'thumbnails', 'skipped');
     }

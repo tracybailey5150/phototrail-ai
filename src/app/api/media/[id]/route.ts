@@ -47,22 +47,29 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     previewUrl = prevData?.publicUrl || null;
   }
 
-  // Get location and timestamp data
-  const { data: location } = await admin.from('media_locations')
-    .select('*')
-    .eq('media_item_id', id)
-    .single();
-
-  const { data: timestamp } = await admin.from('media_timestamps')
-    .select('*')
-    .eq('media_item_id', id)
-    .single();
+  // Get location, timestamp, AI analysis, OCR, and equipment data
+  const [
+    { data: location },
+    { data: timestamp },
+    { data: aiAnalysis },
+    { data: ocr },
+    { data: equipment },
+  ] = await Promise.all([
+    admin.from('media_locations').select('*').eq('media_item_id', id).single(),
+    admin.from('media_timestamps').select('*').eq('media_item_id', id).single(),
+    admin.from('media_ai_analysis').select('*').eq('media_item_id', id).single(),
+    admin.from('media_ocr').select('*').eq('media_item_id', id).single(),
+    admin.from('media_equipment').select('*').eq('media_item_id', id),
+  ]);
 
   return NextResponse.json({
     item,
     jobs: jobs || [],
     location: location || null,
     timestamp: timestamp || null,
+    aiAnalysis: aiAnalysis || null,
+    ocr: ocr || null,
+    equipment: equipment || [],
     urls: { original: originalUrl, thumbnail: thumbnailUrl, preview: previewUrl },
   });
 }

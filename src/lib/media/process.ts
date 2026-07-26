@@ -5,6 +5,7 @@ import { generateThumbnail, generatePreview, getImageDimensions } from './thumbn
 import { isImage, isScreenshot } from './detect';
 import { reverseGeocode, lookupTimezone } from './geocode';
 import { resolveTimestamp, inferDateFromFilename } from './timestamp';
+import { analyzeImage, extractOcr } from './ai-analysis';
 
 interface ProcessResult {
   success: boolean;
@@ -251,6 +252,146 @@ export async function processMediaItem(mediaItemId: string): Promise<ProcessResu
       }
     }
 
+    // Step 6: OCR + AI Visual Analysis (only for images with preview)
+    if (isImage(item.original_mime_type)) {
+      // Get the preview image for AI (smaller, faster)
+      const { data: currentItem } = await admin.from('media_items').select('preview_path, collection_id').eq('id', mediaItemId).single();
+      const { data: coll } = await admin.from('collections').select('mode, name, client_name, site_address').eq('id', currentItem?.collection_id || item.collection_id).single();
+
+      let analysisBase64: string | null = null;
+      if (currentItem?.preview_path) {
+        const { data: previewFile } = await admin.storage.from('derivatives').download(currentItem.preview_path);
+        if (previewFile) {
+          const previewBuf = Buffer.from(await previewFile.arrayBuffer());
+          analysisBase64 = previewBuf.toString('base64');
+        }
+      }
+
+      if (analysisBase64) {
+        // OCR
+        await updateStep(admin, mediaItemId, item.org_id, 'ocr', 'running');
+        const ocrResult = await extractOcr(analysisBase64);
+        if (ocrResult) {
+          // Extract serial numbers and MAC addresses from OCR
+          const serials: string[] = [];
+          const macs: string[] = [];
+          const roomNumbers: string[] = [];
+          for (const text of ocrResult.texts) {
+            // MAC address pattern
+            if (/([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}/.test(text) || /[0-9A-Fa-f]{12}/.test(text)) {
+              macs.push(text);
+            }
+            // Room number pattern
+            if (/^(room|rm)\s*#?\s*\d+/i.test(text) || /^\d{3,4}[A-Z]?$/i.test(text)) {
+              roomNumbers.push(text);
+            }
+          }
+
+          await admin.from('media_ocr').upsert({
+            media_item_id: mediaItemId,
+            org_id: item.org_id,
+            texts: ocrResult.texts,
+            raw_text: ocrResult.raw,
+            extracted_serials: serials,
+            extracted_macs: macs,
+            extracted_room_numbers: roomNumbers,
+            model_used: 'claude-sonnet-4-6',
+          }, { onConflict: 'media_item_id' });
+          await updateStep(admin, mediaItemId, item.org_id, 'ocr', 'completed', undefined, {
+            textCount: ocrResult.texts.length,
+            hasMacs: macs.length > 0,
+            hasRoomNumbers: roomNumbers.length > 0,
+          });
+        } else {
+          await updateStep(admin, mediaItemId, item.org_id, 'ocr', 'completed', undefined, { textCount: 0 });
+        }
+
+        // AI Visual Analysis
+        await updateStep(admin, mediaItemId, item.org_id, 'ai_analysis', 'running');
+        const mode = (coll?.mode || 'travel') as 'travel' | 'project';
+        const analysis = await analyzeImage(analysisBase64, mode, {
+          collectionName: coll?.name,
+          clientName: coll?.client_name,
+          siteName: coll?.site_address,
+        });
+
+        if (analysis) {
+          await admin.from('media_ai_analysis').upsert({
+            media_item_id: mediaItemId,
+            org_id: item.org_id,
+            summary: analysis.summary,
+            scene_type: analysis.scene_type,
+            indoor_outdoor: analysis.indoor_outdoor,
+            lighting: analysis.lighting,
+            time_of_day_visual: analysis.time_of_day_visual,
+            activities: analysis.activities || [],
+            objects: analysis.objects || [],
+            visible_text: analysis.visible_text || [],
+            location_candidates: analysis.location_candidates || [],
+            event_candidates: analysis.event_candidates || [],
+            quality: analysis.quality || null,
+            confidence: analysis.confidence,
+            reasoning_summary: analysis.reasoning_summary,
+            landmarks: analysis.landmarks || null,
+            venue_candidates: analysis.venue_candidates || null,
+            transportation: analysis.transportation || null,
+            weather_appearance: analysis.weather_appearance || null,
+            scenic_score: analysis.scenic_score ?? null,
+            social_media_score: analysis.social_media_score ?? null,
+            memory_highlight_score: analysis.memory_highlight_score ?? null,
+            suggested_event_name: analysis.suggested_event_name || null,
+            suggested_caption: analysis.suggested_caption || null,
+            room_candidates: analysis.room_candidates || null,
+            workstream: analysis.workstream || null,
+            trade: analysis.trade || null,
+            equipment: analysis.equipment || null,
+            installation_status: analysis.installation_status || null,
+            visible_issues: analysis.visible_issues || null,
+            safety_concerns: analysis.safety_concerns || null,
+            suggested_field_report_note: analysis.suggested_field_report_note || null,
+            suggested_punch_item: analysis.suggested_punch_item || null,
+            model_used: 'claude-sonnet-4-6',
+            analysis_mode: mode,
+            raw_response: analysis as unknown as Record<string, unknown>,
+          }, { onConflict: 'media_item_id' });
+
+          // Extract equipment records for project mode
+          if (mode === 'project' && analysis.equipment && analysis.equipment.length > 0) {
+            for (const eq of analysis.equipment) {
+              if (eq.manufacturer || eq.model || eq.serial_number || eq.mac_address) {
+                await admin.from('media_equipment').insert({
+                  media_item_id: mediaItemId,
+                  org_id: item.org_id,
+                  manufacturer: eq.manufacturer || null,
+                  model: eq.model || null,
+                  device_type: eq.device_type || null,
+                  serial_number_raw: eq.serial_number || null,
+                  serial_number_normalized: eq.serial_number || null,
+                  mac_address_raw: eq.mac_address || null,
+                  mac_address_normalized: normalizeMac(eq.mac_address),
+                  asset_tag: eq.asset_tag || null,
+                  confidence: eq.confidence,
+                  verification_status: eq.confidence >= 0.9 ? 'verified' : 'needs_review',
+                  source: 'visual_ai',
+                });
+              }
+            }
+          }
+
+          await updateStep(admin, mediaItemId, item.org_id, 'ai_analysis', 'completed', undefined, {
+            sceneType: analysis.scene_type,
+            confidence: analysis.confidence,
+            equipmentCount: analysis.equipment?.length || 0,
+          });
+        } else {
+          await updateStep(admin, mediaItemId, item.org_id, 'ai_analysis', 'failed', 'AI analysis returned no result');
+        }
+      } else {
+        await updateStep(admin, mediaItemId, item.org_id, 'ocr', 'skipped');
+        await updateStep(admin, mediaItemId, item.org_id, 'ai_analysis', 'skipped');
+      }
+    }
+
     // Update collection item count
     const { count } = await admin.from('media_items')
       .select('*', { count: 'exact', head: true })
@@ -315,4 +456,11 @@ async function updateStep(
       ...(status === 'completed' || status === 'failed' ? { completed_at: new Date().toISOString() } : {}),
     });
   }
+}
+
+function normalizeMac(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/[^0-9A-Fa-f]/g, '');
+  if (cleaned.length !== 12) return raw;
+  return cleaned.match(/.{2}/g)!.join(':').toUpperCase();
 }

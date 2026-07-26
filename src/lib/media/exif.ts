@@ -40,7 +40,8 @@ export async function extractMetadata(buffer: Buffer): Promise<ExtractedMetadata
 
     if (!exif) return result;
 
-    result.raw = exif;
+    // Serialize raw EXIF — convert Dates to ISO strings for JSONB storage
+    result.raw = JSON.parse(JSON.stringify(exif, (_, v) => v instanceof Date ? v.toISOString() : v));
     result.width = exif.ImageWidth || exif.ExifImageWidth || exif.PixelXDimension;
     result.height = exif.ImageHeight || exif.ExifImageHeight || exif.PixelYDimension;
     result.orientation = exif.Orientation;

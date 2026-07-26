@@ -152,12 +152,15 @@ export async function processMediaItem(mediaItemId: string): Promise<ProcessResu
     {
       const filenameDate = inferDateFromFilename(item.original_filename);
 
-      // Re-read item for updated EXIF data
-      const { data: updated } = await admin.from('media_items').select('*').eq('id', mediaItemId).single();
+      // Re-read item for updated EXIF data (now properly serialized)
+      const { data: updated } = await admin.from('media_items').select('exif_data, capture_time').eq('id', mediaItemId).single();
       const exifData = (updated?.exif_data || {}) as Record<string, unknown>;
 
+      // Use the capture_time already extracted by EXIF step as a reliable source
+      const exifCaptureTime = updated?.capture_time ? new Date(updated.capture_time) : null;
+
       const resolved = resolveTimestamp({
-        exifDateTimeOriginal: exifData.DateTimeOriginal ? new Date(exifData.DateTimeOriginal as string) : null,
+        exifDateTimeOriginal: exifData.DateTimeOriginal ? new Date(exifData.DateTimeOriginal as string) : exifCaptureTime,
         exifCreateDate: exifData.CreateDate ? new Date(exifData.CreateDate as string) : null,
         exifDigitized: exifData.DateTimeDigitized ? new Date(exifData.DateTimeDigitized as string) : null,
         exifModifyDate: exifData.ModifyDate ? new Date(exifData.ModifyDate as string) : null,
@@ -171,7 +174,7 @@ export async function processMediaItem(mediaItemId: string): Promise<ProcessResu
       await admin.from('media_timestamps').upsert({
         media_item_id: mediaItemId,
         org_id: item.org_id,
-        exif_datetime_original: exifData.DateTimeOriginal ? new Date(exifData.DateTimeOriginal as string).toISOString() : null,
+        exif_datetime_original: exifData.DateTimeOriginal ? new Date(exifData.DateTimeOriginal as string).toISOString() : (exifCaptureTime?.toISOString() || null),
         exif_create_date: exifData.CreateDate ? new Date(exifData.CreateDate as string).toISOString() : null,
         exif_digitized: exifData.DateTimeDigitized ? new Date(exifData.DateTimeDigitized as string).toISOString() : null,
         exif_modify_date: exifData.ModifyDate ? new Date(exifData.ModifyDate as string).toISOString() : null,

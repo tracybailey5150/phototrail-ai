@@ -93,7 +93,10 @@ export async function analyzeImage(
   context?: { collectionName?: string; clientName?: string; siteName?: string }
 ): Promise<AnalysisResult | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.error('[AI] No ANTHROPIC_API_KEY set');
+    return null;
+  }
 
   const extension = mode === 'travel' ? TRAVEL_EXTENSION : PROJECT_EXTENSION;
   const contextNote = mode === 'project' && context?.clientName
@@ -140,13 +143,16 @@ Important rules:
 
     if (!res.ok) {
       const errText = await res.text();
-      console.error('Claude API error:', res.status, errText.slice(0, 200));
+      console.error('[AI] Claude API error:', res.status, errText.slice(0, 500));
       return null;
     }
 
     const data = await res.json();
     const text = data.content?.[0]?.text;
-    if (!text) return null;
+    if (!text) {
+      console.error('[AI] No text in Claude response:', JSON.stringify(data).slice(0, 300));
+      return null;
+    }
 
     // Extract JSON from response (handle potential markdown wrapping)
     let jsonStr = text.trim();
@@ -167,7 +173,10 @@ Important rules:
  */
 export async function extractOcr(imageBase64: string): Promise<{ texts: string[]; raw: string } | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.error('[AI] No ANTHROPIC_API_KEY set');
+    return null;
+  }
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {

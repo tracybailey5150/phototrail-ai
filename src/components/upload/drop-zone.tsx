@@ -16,7 +16,8 @@ interface UploadFile {
 }
 
 const ACCEPTED = '.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.bmp,.tiff,.mp4,.mov,.avi,.webm';
-const CONCURRENT_UPLOADS = 3; // upload 3 files at a time
+const CONCURRENT_UPLOADS = 3;
+const PRESIGN_THRESHOLD = 4 * 1024 * 1024; // 4MB — files over this use presigned R2 upload
 
 export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -39,30 +40,75 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
     if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
   }, [addFiles]);
 
-  // Upload a single file
+  // Upload a single file — uses presigned R2 for large files, API route for small
   const uploadOne = async (f: UploadFile): Promise<void> => {
     setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'uploading' as const } : x));
 
     try {
-      const formData = new FormData();
-      formData.append('collection_id', collectionId);
-      formData.append('files', f.file);
+      if (f.file.size > PRESIGN_THRESHOLD) {
+        // Large file — presigned direct upload to R2
+        // Step 1: Get presigned URL + create DB record
+        const presignRes = await fetch('/api/upload/presign', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            collectionId,
+            filename: f.file.name,
+            contentType: f.file.type || 'application/octet-stream',
+            fileSize: f.file.size,
+          }),
+        });
 
-      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+        if (!presignRes.ok) {
+          const err = await presignRes.json().catch(() => ({ error: 'Presign failed' }));
+          setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: err.error } : x));
+          return;
+        }
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => 'Upload failed');
-        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: `${res.status}: ${errText.slice(0, 100)}` } : x));
-        return;
-      }
+        const { presignedUrl, mediaId } = await presignRes.json();
 
-      const data = await res.json();
-      const result = data.results?.[0];
+        // Step 2: Upload directly to R2 (bypasses Vercel size limit)
+        const uploadRes = await fetch(presignedUrl, {
+          method: 'PUT',
+          body: f.file,
+          mode: 'cors',
+        });
 
-      if (result?.status === 'uploaded') {
-        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'processing' as const, mediaId: result.id } : x));
+        if (!uploadRes.ok) {
+          setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: `R2 upload failed: ${uploadRes.status}` } : x));
+          return;
+        }
+
+        // Step 3: Confirm upload and trigger processing
+        await fetch('/api/upload/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mediaId }),
+        });
+
+        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'processing' as const, mediaId } : x));
       } else {
-        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: result?.error || 'Unknown error' } : x));
+        // Small file — upload through API route
+        const formData = new FormData();
+        formData.append('collection_id', collectionId);
+        formData.append('files', f.file);
+
+        const res = await fetch('/api/upload', { method: 'POST', body: formData });
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => 'Upload failed');
+          setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: `${res.status}: ${errText.slice(0, 100)}` } : x));
+          return;
+        }
+
+        const data = await res.json();
+        const result = data.results?.[0];
+
+        if (result?.status === 'uploaded') {
+          setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'processing' as const, mediaId: result.id } : x));
+        } else {
+          setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: result?.error || 'Unknown error' } : x));
+        }
       }
     } catch (err) {
       setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: 'Network error' } : x));

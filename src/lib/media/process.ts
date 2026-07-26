@@ -26,17 +26,32 @@ export async function processMediaItem(mediaItemId: string): Promise<ProcessResu
     const { data: item } = await admin.from('media_items').select('*').eq('id', mediaItemId).single();
     if (!item) return { success: false, error: 'Media item not found' };
 
-    // Download original from storage
-    const { data: fileData, error: dlError } = await admin.storage
-      .from('originals')
-      .download(item.original_storage_path);
+    // Download original from storage (Supabase or R2)
+    let buffer: Buffer;
+    const isR2 = item.original_storage_path.startsWith('phototrail/');
 
-    if (dlError || !fileData) {
-      await updateStep(admin, mediaItemId, item.org_id, 'download', 'failed', dlError?.message);
-      throw new Error(`Download failed: ${dlError?.message}`);
+    if (isR2) {
+      // R2 direct upload — fetch from public R2 URL
+      const r2Base = (process.env.NEXT_PUBLIC_R2_PUBLIC_URL || '').replace(/\/$/, '');
+      const r2Url = `${r2Base}/${item.original_storage_path}`;
+      const r2Res = await fetch(r2Url);
+      if (!r2Res.ok) {
+        await updateStep(admin, mediaItemId, item.org_id, 'download', 'failed', `R2 download failed: ${r2Res.status}`);
+        throw new Error(`R2 download failed: ${r2Res.status}`);
+      }
+      buffer = Buffer.from(await r2Res.arrayBuffer());
+    } else {
+      // Supabase Storage
+      const { data: fileData, error: dlError } = await admin.storage
+        .from('originals')
+        .download(item.original_storage_path);
+
+      if (dlError || !fileData) {
+        await updateStep(admin, mediaItemId, item.org_id, 'download', 'failed', dlError?.message);
+        throw new Error(`Download failed: ${dlError?.message}`);
+      }
+      buffer = Buffer.from(await fileData.arrayBuffer());
     }
-
-    const buffer = Buffer.from(await fileData.arrayBuffer());
 
     // Step 1: SHA-256 hash
     await updateStep(admin, mediaItemId, item.org_id, 'hash', 'running');

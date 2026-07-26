@@ -86,7 +86,8 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
 
       setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'processing' as const, mediaId } : x));
     } catch (err) {
-      setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: err instanceof Error ? err.message : 'Network error' } : x));
+      const msg = err instanceof Error ? `Error: ${err.message}` : 'Network error — check connection';
+      setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: msg } : x));
     }
   };
 
@@ -162,7 +163,7 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
           {dragging ? 'Drop files here' : 'Drag & drop photos and videos'}
         </p>
         <p className="mt-1 text-xs text-zinc-500">
-          JPEG, PNG, WebP, HEIC, MP4, MOV — up to 50MB each
+          JPEG, PNG, WebP, HEIC, MP4, MOV — any size, direct cloud upload
         </p>
       </div>
 

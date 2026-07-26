@@ -138,7 +138,7 @@ export function Sidebar() {
       }`}
     >
       <div className="flex items-center gap-3 px-4 h-14 border-b border-zinc-800">
-        <span className="text-xl">📸</span>
+        <img src="/logo.png" alt={APP_NAME} className="h-8 w-8 object-contain flex-shrink-0" />
         {!collapsed && (
           <span className="text-sm font-bold text-amber-400 tracking-wide">{APP_NAME}</span>
         )}

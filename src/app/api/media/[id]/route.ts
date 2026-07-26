@@ -89,6 +89,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (body.original_filename) updates.original_filename = body.original_filename;
   if (body.capture_time) updates.capture_time = body.capture_time;
   if (body.capture_time_source) updates.capture_time_source = body.capture_time_source;
+  if (body.description !== undefined) {
+    // Save description to ai_analysis table
+    await admin.from('media_ai_analysis').upsert({
+      media_item_id: id,
+      org_id: profile.org_id,
+      summary: body.description,
+    }, { onConflict: 'media_item_id' });
+  }
 
   const { error } = await admin.from('media_items')
     .update(updates)

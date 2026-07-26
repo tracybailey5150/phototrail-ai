@@ -22,6 +22,11 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
   const [newName, setNewName] = useState('');
   const [manualDate, setManualDate] = useState('');
   const [savingDate, setSavingDate] = useState(false);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [editDesc, setEditDesc] = useState('');
+  const [savingDesc, setSavingDesc] = useState(false);
+  const [researching, setResearching] = useState(false);
+  const [deepResearch, setDeepResearch] = useState<string | null>(null);
 
   const openDetail = async (id: string) => {
     setSelected(id);
@@ -123,18 +128,80 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
               )}
             </div>
 
-            {/* AI Summary */}
-            {(detail as { aiAnalysis?: { summary?: string } }).aiAnalysis?.summary && (
-              <div className="bg-zinc-800/50 rounded-lg p-4">
-                <h4 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">AI Description</h4>
-                <p className="text-sm text-zinc-200">{(detail as { aiAnalysis: { summary: string } }).aiAnalysis.summary}</p>
-                <div className="flex gap-3 mt-2 text-xs text-zinc-500">
-                  {(detail as { aiAnalysis?: { scene_type?: string } }).aiAnalysis?.scene_type && <span>Scene: {(detail as { aiAnalysis: { scene_type: string } }).aiAnalysis.scene_type}</span>}
-                  {(detail as { aiAnalysis?: { confidence?: number } }).aiAnalysis?.confidence && <span>Confidence: {Math.round(((detail as { aiAnalysis: { confidence: number } }).aiAnalysis.confidence) * 100)}%</span>}
-                  {(detail as { aiAnalysis?: { indoor_outdoor?: string } }).aiAnalysis?.indoor_outdoor && <span>{(detail as { aiAnalysis: { indoor_outdoor: string } }).aiAnalysis.indoor_outdoor}</span>}
+            {/* AI Description — editable */}
+            <div className="bg-zinc-800/50 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-xs font-semibold text-amber-400 uppercase tracking-wider">AI Description</h4>
+                <div className="flex gap-2">
+                  {!editingDesc && (
+                    <button onClick={() => { setEditDesc((detail as { aiAnalysis?: { summary?: string } }).aiAnalysis?.summary || ''); setEditingDesc(true); }} className="text-xs text-zinc-500 hover:text-amber-400">Edit</button>
+                  )}
+                  <Button size="sm" variant="secondary" loading={researching} onClick={async () => {
+                    if (!selected) return;
+                    setResearching(true);
+                    setDeepResearch(null);
+                    try {
+                      const res = await fetch('/api/media/research', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mediaId: selected }),
+                      });
+                      if (res.ok) {
+                        const data = await res.json();
+                        setDeepResearch(data.research);
+                      }
+                    } catch {}
+                    setResearching(false);
+                  }}>
+                    {researching ? 'Researching...' : '🔍 Deep Research'}
+                  </Button>
                 </div>
               </div>
-            )}
+              {editingDesc ? (
+                <div className="space-y-2">
+                  <textarea
+                    value={editDesc}
+                    onChange={e => setEditDesc(e.target.value)}
+                    rows={4}
+                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 outline-none focus:ring-2 focus:ring-amber-500 resize-y"
+                  />
+                  <div className="flex gap-2">
+                    <Button size="sm" loading={savingDesc} onClick={async () => {
+                      if (!selected) return;
+                      setSavingDesc(true);
+                      await fetch(`/api/media/${selected}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ description: editDesc }),
+                      });
+                      const res = await fetch(`/api/media/${selected}`);
+                      if (res.ok) setDetail(await res.json());
+                      setEditingDesc(false);
+                      setSavingDesc(false);
+                    }}>Save</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditingDesc(false)}>Cancel</Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-zinc-200">{(detail as { aiAnalysis?: { summary?: string } }).aiAnalysis?.summary || (detail as { item?: { description?: string } }).item?.description || 'No description yet'}</p>
+                  <div className="flex gap-3 mt-2 text-xs text-zinc-500">
+                    {(detail as { aiAnalysis?: { scene_type?: string } }).aiAnalysis?.scene_type && <span>Scene: {(detail as { aiAnalysis: { scene_type: string } }).aiAnalysis.scene_type}</span>}
+                    {(detail as { aiAnalysis?: { confidence?: number } }).aiAnalysis?.confidence && <span>Confidence: {Math.round(((detail as { aiAnalysis: { confidence: number } }).aiAnalysis.confidence) * 100)}%</span>}
+                    {(detail as { aiAnalysis?: { indoor_outdoor?: string } }).aiAnalysis?.indoor_outdoor && <span>{(detail as { aiAnalysis: { indoor_outdoor: string } }).aiAnalysis.indoor_outdoor}</span>}
+                    {(detail as { aiAnalysis?: { estimated_location?: string } }).aiAnalysis?.estimated_location && <span>📍 {(detail as { aiAnalysis: { estimated_location: string } }).aiAnalysis.estimated_location}</span>}
+                  </div>
+                </>
+              )}
+
+              {/* Deep Research Results */}
+              {deepResearch && (
+                <div className="mt-4 pt-4 border-t border-zinc-700">
+                  <h5 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-2">🔍 Deep Research</h5>
+                  <div className="text-sm text-zinc-200 whitespace-pre-wrap leading-relaxed">{deepResearch}</div>
+                </div>
+              )}
+            </div>
 
             {/* Location */}
             {(detail as { location?: { city?: string; country?: string; place_name?: string } }).location?.city && (

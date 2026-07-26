@@ -5,6 +5,8 @@ import { logActivity } from '@/lib/activity';
 import { processMediaItem } from '@/lib/media/process';
 import { v4 as uuidv4 } from 'uuid';
 
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

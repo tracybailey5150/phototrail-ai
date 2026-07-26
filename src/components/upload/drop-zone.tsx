@@ -16,7 +16,7 @@ interface UploadFile {
 }
 
 const ACCEPTED = '.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.bmp,.tiff,.mp4,.mov,.avi,.webm';
-const MAX_BATCH = 20;
+const CONCURRENT_UPLOADS = 3; // upload 3 files at a time
 
 export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -39,65 +39,61 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
     if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
   }, [addFiles]);
 
+  // Upload a single file
+  const uploadOne = async (f: UploadFile): Promise<void> => {
+    setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'uploading' as const } : x));
+
+    try {
+      const formData = new FormData();
+      formData.append('collection_id', collectionId);
+      formData.append('files', f.file);
+
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => 'Upload failed');
+        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: `${res.status}: ${errText.slice(0, 100)}` } : x));
+        return;
+      }
+
+      const data = await res.json();
+      const result = data.results?.[0];
+
+      if (result?.status === 'uploaded') {
+        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'processing' as const, mediaId: result.id } : x));
+      } else {
+        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: result?.error || 'Unknown error' } : x));
+      }
+    } catch (err) {
+      setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: 'Network error' } : x));
+    }
+  };
+
   const handleUpload = async () => {
     const queued = files.filter((f) => f.status === 'queued');
     if (!queued.length) return;
     setUploading(true);
 
-    // Upload in batches
-    for (let i = 0; i < queued.length; i += MAX_BATCH) {
-      const batch = queued.slice(i, i + MAX_BATCH);
-      const formData = new FormData();
-      formData.append('collection_id', collectionId);
-      batch.forEach((f) => formData.append('files', f.file));
-
-      // Mark batch as uploading
-      setFiles((prev) =>
-        prev.map((f) =>
-          batch.find((b) => b.id === f.id) ? { ...f, status: 'uploading' as const } : f
-        )
-      );
-
-      try {
-        const res = await fetch('/api/upload', { method: 'POST', body: formData });
-        const data = await res.json();
-
-        if (data.results) {
-          setFiles((prev) =>
-            prev.map((f) => {
-              const batchFile = batch.find((b) => b.id === f.id);
-              if (!batchFile) return f;
-              const idx = batch.indexOf(batchFile);
-              const result = data.results[idx];
-              if (!result) return { ...f, status: 'error' as const, error: 'No result' };
-              return {
-                ...f,
-                status: result.status === 'uploaded' ? ('processing' as const) : ('error' as const),
-                error: result.error,
-                mediaId: result.id,
-              };
-            })
-          );
-        }
-      } catch (err) {
-        setFiles((prev) =>
-          prev.map((f) =>
-            batch.find((b) => b.id === f.id) ? { ...f, status: 'error' as const, error: 'Upload failed' } : f
-          )
-        );
+    // Process files with concurrent workers (3 at a time)
+    const queue = [...queued];
+    const workers = Array.from({ length: Math.min(CONCURRENT_UPLOADS, queue.length) }, async () => {
+      while (queue.length > 0) {
+        const next = queue.shift();
+        if (next) await uploadOne(next);
       }
-    }
+    });
+
+    await Promise.all(workers);
 
     setUploading(false);
+    onUploadComplete();
 
-    // Poll for processing completion
+    // Mark processing items as done after a delay
     setTimeout(() => {
-      onUploadComplete();
-      // Mark processing items as done after a delay
       setFiles((prev) =>
         prev.map((f) => (f.status === 'processing' ? { ...f, status: 'done' as const } : f))
       );
-    }, 3000);
+    }, 5000);
   };
 
   const removeFile = (id: string) => {
@@ -106,6 +102,10 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
 
   const clearCompleted = () => {
     setFiles((prev) => prev.filter((f) => f.status !== 'done'));
+  };
+
+  const retryFailed = () => {
+    setFiles((prev) => prev.map((f) => f.status === 'error' ? { ...f, status: 'queued' as const, error: undefined } : f));
   };
 
   const queuedCount = files.filter((f) => f.status === 'queued').length;
@@ -159,6 +159,11 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
               {errorCount > 0 && <span className="text-red-400">{errorCount} failed</span>}
             </div>
             <div className="flex gap-2">
+              {errorCount > 0 && (
+                <button onClick={retryFailed} className="text-amber-400 hover:text-amber-300">
+                  Retry failed
+                </button>
+              )}
               {doneCount > 0 && (
                 <button onClick={clearCompleted} className="text-zinc-500 hover:text-zinc-300">
                   Clear completed
@@ -173,13 +178,13 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
               <div key={f.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-zinc-950/50">
                 <StatusIcon status={f.status} />
                 <span className="flex-1 text-sm text-zinc-300 truncate">{f.file.name}</span>
-                <span className="text-xs text-zinc-600">{(f.file.size / 1024).toFixed(0)} KB</span>
+                <span className="text-xs text-zinc-600">{(f.file.size / 1024 / 1024).toFixed(1)} MB</span>
                 {f.status === 'queued' && (
                   <button onClick={() => removeFile(f.id)} className="text-zinc-600 hover:text-red-400 text-xs">
                     Remove
                   </button>
                 )}
-                {f.error && <span className="text-xs text-red-400 truncate max-w-32">{f.error}</span>}
+                {f.error && <span className="text-xs text-red-400 truncate max-w-48">{f.error}</span>}
               </div>
             ))}
           </div>
@@ -191,7 +196,7 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
               disabled={uploading}
               className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-medium rounded-lg transition-colors disabled:opacity-50"
             >
-              {uploading ? `Uploading...` : `Upload ${queuedCount} file${queuedCount !== 1 ? 's' : ''}`}
+              {uploading ? `Uploading (${uploadingCount} active)...` : `Upload ${queuedCount} file${queuedCount !== 1 ? 's' : ''}`}
             </button>
           )}
         </div>

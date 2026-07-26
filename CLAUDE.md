@@ -1,10 +1,10 @@
 # PhotoTrail AI — Intelligent Photo Organization & Evidence Platform
 
 ## Project
-- **Domain:** phototrail-ai.vercel.app (custom domain TBD)
+- **Domain:** phototrailai.com
 - **Repo:** tracybailey5150/phototrail-ai
 - **Supabase project:** wwnvebnfjeemaakieqei
-- **Vercel project:** TBD (after first deploy)
+- **Vercel project:** prj_Ytcr2qIxi7pb39XOfPEM0N7qhKKg
 - **Stack:** Next.js 16, TypeScript, Tailwind v4, Supabase (Auth + Postgres + Storage), Anthropic Claude, Zod, react-hook-form
 
 ## What This Is
@@ -14,15 +14,15 @@ AI-powered photo organization platform with two modes:
 
 Core principle: Never present AI assumptions as verified. Every AI-derived field carries value, source, confidence score, and verification status.
 
-## Status: Phase 1 (Foundation)
-- Auth, organizations, collections CRUD, navigation shell
-- Phase 2: file upload, EXIF extraction, thumbnails, AI analysis
-- Phase 3: location/time resolution, reverse geocoding
-- Phase 4: Claude visual analysis, OCR
-- Phase 5: auto-grouping engine
-- Phase 6: timeline, gallery, map, search
-- Phase 7: reports and exports
-- Phase 8: hardening
+## Status: MVP Complete (All 8 Phases)
+- Phase 1: Auth, orgs, collections, nav shell
+- Phase 2: Upload, EXIF, thumbnails, SHA-256 dedup
+- Phase 3: Reverse geocoding, timezone, timestamp resolution
+- Phase 4: Claude AI visual analysis, OCR, equipment extraction
+- Phase 5: Auto-grouping (trips/days/events for travel, rooms for project)
+- Phase 6: Timeline, map, search (AI-powered)
+- Phase 7: Reports, exports (JSON/CSV), review queue
+- Phase 8: Settings, upload history, processing status
 
 ## Key Patterns
 - Custom UI components (NOT shadcn/ui) — amber (#F59E0B) accents

@@ -125,12 +125,12 @@ export async function processMediaItem(mediaItemId: string): Promise<ProcessResu
       const thumbPath = `${item.org_id}/${item.collection_id}/thumb_${item.id}.jpg`;
       const previewPath = `${item.org_id}/${item.collection_id}/preview_${item.id}.jpg`;
 
-      await admin.storage.from('derivatives').upload(thumbPath, thumbResult.buffer, {
+      await admin.storage.from('derivatives').upload(thumbPath, new Uint8Array(thumbResult.buffer), {
         contentType: 'image/jpeg',
         upsert: true,
       });
 
-      await admin.storage.from('derivatives').upload(previewPath, previewResult.buffer, {
+      await admin.storage.from('derivatives').upload(previewPath, new Uint8Array(previewResult.buffer), {
         contentType: 'image/jpeg',
         upsert: true,
       });

@@ -8,7 +8,7 @@ import { DropZone } from '@/components/upload/drop-zone';
 import { MediaGrid } from '@/components/upload/media-grid';
 import type { Collection, MediaItem } from '@/types/database';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://wwnvebnfjeemaakieqei.supabase.co';
 
 export default function CollectionDetailPage() {
   const { id } = useParams();

@@ -70,7 +70,8 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { data: profile } = await supabase
+  const admin = createAdminClient();
+  const { data: profile } = await admin
     .from('profiles')
     .select('org_id')
     .eq('id', user.id)
@@ -80,11 +81,54 @@ export async function GET() {
     return NextResponse.json({ error: 'No organization' }, { status: 404 });
   }
 
-  const { data: org } = await supabase
+  const { data: org } = await admin
     .from('organizations')
     .select('*')
     .eq('id', profile.org_id)
     .single();
+
+  return NextResponse.json({ organization: org });
+}
+
+export async function PATCH(request: Request) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const admin = createAdminClient();
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('org_id, role')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile?.org_id) {
+    return NextResponse.json({ error: 'No organization' }, { status: 404 });
+  }
+
+  const body = await request.json();
+  const { name } = body;
+
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (name) updates.name = name;
+
+  const { data: org, error } = await admin
+    .from('organizations')
+    .update(updates)
+    .eq('id', profile.org_id)
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ error: 'Failed to update' }, { status: 500 });
+
+  await logActivity({
+    orgId: profile.org_id,
+    actorId: user.id,
+    type: 'org.updated',
+    title: 'Organization updated',
+    entityType: 'organization',
+    entityId: profile.org_id,
+  });
 
   return NextResponse.json({ organization: org });
 }

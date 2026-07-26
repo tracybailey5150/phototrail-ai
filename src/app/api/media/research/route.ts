@@ -18,16 +18,20 @@ export async function POST(request: Request) {
 
   // Get media item + existing analysis
   const { data: item } = await admin.from('media_items')
-    .select('id, original_storage_path, thumbnail_path, original_mime_type')
+    .select('id, original_storage_path, thumbnail_path, original_mime_type, capture_time, capture_time_source, gps_latitude, gps_longitude')
     .eq('id', mediaId).eq('org_id', profile.org_id).single();
   if (!item) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const { data: existingAnalysis } = await admin.from('media_ai_analysis')
-    .select('summary, scene_type, location_candidates, landmarks, objects')
+    .select('summary, scene_type, location_candidates, landmarks, objects, estimated_location')
     .eq('media_item_id', mediaId).single();
 
   const { data: location } = await admin.from('media_locations')
-    .select('city, state_province, country, place_name')
+    .select('city, state_province, country, place_name, raw_latitude, raw_longitude, timezone')
+    .eq('media_item_id', mediaId).single();
+
+  const { data: timestamp } = await admin.from('media_timestamps')
+    .select('best_capture_time, capture_time_source, capture_timezone')
     .eq('media_item_id', mediaId).single();
 
   // Get the image for deep analysis
@@ -49,10 +53,19 @@ export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return NextResponse.json({ error: 'AI not configured' }, { status: 500 });
 
+  // Build rich context from all available data
+  const captureTime = item.capture_time || timestamp?.best_capture_time;
+  const timeSource = item.capture_time_source || timestamp?.capture_time_source;
+
   const context = [
     existingAnalysis?.summary ? `Initial AI description: ${existingAnalysis.summary}` : '',
     existingAnalysis?.scene_type ? `Scene type: ${existingAnalysis.scene_type}` : '',
-    location?.city ? `Location: ${[location.place_name, location.city, location.state_province, location.country].filter(Boolean).join(', ')}` : '',
+    captureTime ? `Date/Time photo was taken: ${new Date(captureTime).toLocaleString('en-US', { timeZone: timestamp?.capture_timezone || 'America/Chicago', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })} (source: ${timeSource || 'unknown'})` : '',
+    item.gps_latitude ? `GPS Coordinates: ${item.gps_latitude}, ${item.gps_longitude}` : '',
+    location?.city ? `Geocoded Location: ${[location.place_name, location.city, location.state_province, location.country].filter(Boolean).join(', ')}` : '',
+    location?.raw_latitude ? `GPS: ${location.raw_latitude}, ${location.raw_longitude}` : '',
+    location?.timezone ? `Timezone: ${location.timezone}` : '',
+    existingAnalysis?.estimated_location ? `AI estimated location: ${existingAnalysis.estimated_location}` : '',
     existingAnalysis?.landmarks ? `Landmarks detected: ${JSON.stringify(existingAnalysis.landmarks)}` : '',
     existingAnalysis?.objects ? `Objects detected: ${JSON.stringify(existingAnalysis.objects)}` : '',
   ].filter(Boolean).join('\n');

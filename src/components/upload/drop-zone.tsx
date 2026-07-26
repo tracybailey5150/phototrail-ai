@@ -18,7 +18,8 @@ interface UploadFile {
 
 const ACCEPTED = '.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.bmp,.tiff,.mp4,.mov,.avi,.webm';
 const CONCURRENT_UPLOADS = 3;
-const PRESIGN_THRESHOLD = 4 * 1024 * 1024; // 4MB — files over this use presigned R2 upload
+const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB chunks
+const CHUNK_THRESHOLD = 40 * 1024 * 1024; // Files over 40MB use chunked upload
 
 export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -41,27 +42,60 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
     if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
   }, [addFiles]);
 
-  // Upload a single file — client uploads directly to Supabase Storage (no CORS issues, no size limit through API)
+  // Upload a single file — small files go direct to Supabase, large files use chunked upload
   const uploadOne = async (f: UploadFile): Promise<void> => {
     setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'uploading' as const } : x));
 
     try {
-      const supabase = createClient();
       const mediaId = crypto.randomUUID();
       const ext = f.file.name.split('.').pop()?.toLowerCase() || 'bin';
       const storagePath = `uploads/${collectionId}/${mediaId}.${ext}`;
 
-      // Step 1: Upload directly to Supabase Storage from browser (built-in CORS)
-      const { error: uploadError } = await supabase.storage
-        .from('originals')
-        .upload(storagePath, f.file, {
-          contentType: f.file.type || 'application/octet-stream',
-          upsert: false,
-        });
+      if (f.file.size > CHUNK_THRESHOLD) {
+        // Large file — chunked upload through API (bypasses Supabase 50MB limit)
+        const totalChunks = Math.ceil(f.file.size / CHUNK_SIZE);
+        const uploadId = mediaId;
 
-      if (uploadError) {
-        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: uploadError.message } : x));
-        return;
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, f.file.size);
+          const chunk = f.file.slice(start, end);
+
+          const formData = new FormData();
+          formData.append('chunk', chunk);
+          formData.append('chunkIndex', String(i));
+          formData.append('totalChunks', String(totalChunks));
+          formData.append('uploadId', uploadId);
+          formData.append('storagePath', storagePath);
+          formData.append('contentType', f.file.type || 'application/octet-stream');
+
+          const chunkRes = await fetch('/api/upload/chunk', { method: 'POST', body: formData });
+          if (!chunkRes.ok) {
+            const err = await chunkRes.json().catch(() => ({ error: 'Chunk failed' }));
+            setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: `Chunk ${i+1}/${totalChunks}: ${err.error}` } : x));
+            return;
+          }
+
+          // Update progress
+          setFiles((prev) => prev.map((x) => x.id === f.id ? {
+            ...x,
+            error: `Uploading chunk ${i+1}/${totalChunks} (${Math.round((end/f.file.size)*100)}%)`,
+          } : x));
+        }
+      } else {
+        // Small file — direct Supabase Storage upload
+        const supabase = createClient();
+        const { error: uploadError } = await supabase.storage
+          .from('originals')
+          .upload(storagePath, f.file, {
+            contentType: f.file.type || 'application/octet-stream',
+            upsert: false,
+          });
+
+        if (uploadError) {
+          setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: uploadError.message } : x));
+          return;
+        }
       }
 
       // Step 2: Register the media item and trigger processing via API
@@ -182,7 +216,7 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
           {dragging ? 'Drop files here' : 'Drag & drop photos and videos'}
         </p>
         <p className="mt-1 text-xs text-zinc-500">
-          JPEG, PNG, WebP, HEIC, MP4, MOV — photos and videos up to 50MB
+          JPEG, PNG, WebP, HEIC, MP4, MOV — photos and videos — no size limit
         </p>
       </div>
 

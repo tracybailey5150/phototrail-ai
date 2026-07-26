@@ -74,8 +74,14 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
           <div className="flex justify-center py-8"><div className="animate-spin h-8 w-8 border-2 border-amber-500 border-t-transparent rounded-full" /></div>
         ) : detail ? (
           <div className="space-y-4 max-h-[70vh] overflow-y-auto">
-            {/* Preview */}
-            {selectedItem?.thumbnail_path && <img src={`https://wwnvebnfjeemaakieqei.supabase.co/storage/v1/object/public/derivatives/${selectedItem.thumbnail_path}`} alt="" className="w-full rounded-lg max-h-80 object-contain bg-black" />}
+            {/* Full-res image from signed URL, fallback to thumbnail */}
+            {((detail as { urls?: { original?: string } }).urls?.original || selectedItem?.thumbnail_path) && (
+              <img
+                src={(detail as { urls?: { original?: string } }).urls?.original || `https://wwnvebnfjeemaakieqei.supabase.co/storage/v1/object/public/derivatives/${selectedItem?.thumbnail_path}`}
+                alt=""
+                style={{ width: '100%', maxHeight: '70vh', objectFit: 'contain', display: 'block', background: '#000', borderRadius: 8 }}
+              />
+            )}
 
             {/* Editable name */}
             <div className="flex items-center gap-2">

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState, useRef } from 'react';
+import { createClient } from '@/lib/supabase/client';
 
 interface DropZoneProps {
   collectionId: string;
@@ -40,49 +41,48 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
     if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
   }, [addFiles]);
 
-  // Upload a single file — ALL files use presigned R2 upload (no size limit)
+  // Upload a single file — client uploads directly to Supabase Storage (no CORS issues, no size limit through API)
   const uploadOne = async (f: UploadFile): Promise<void> => {
     setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'uploading' as const } : x));
 
     try {
-      // Step 1: Get presigned URL + create DB record
-      const presignRes = await fetch('/api/upload/presign', {
+      const supabase = createClient();
+      const mediaId = crypto.randomUUID();
+      const ext = f.file.name.split('.').pop()?.toLowerCase() || 'bin';
+      const storagePath = `uploads/${collectionId}/${mediaId}.${ext}`;
+
+      // Step 1: Upload directly to Supabase Storage from browser (built-in CORS)
+      const { error: uploadError } = await supabase.storage
+        .from('originals')
+        .upload(storagePath, f.file, {
+          contentType: f.file.type || 'application/octet-stream',
+          upsert: false,
+        });
+
+      if (uploadError) {
+        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: uploadError.message } : x));
+        return;
+      }
+
+      // Step 2: Register the media item and trigger processing via API
+      const res = await fetch('/api/upload/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          mediaId,
           collectionId,
           filename: f.file.name,
           contentType: f.file.type || 'application/octet-stream',
           fileSize: f.file.size,
+          storagePath,
         }),
       });
 
-      if (!presignRes.ok) {
-        const err = await presignRes.json().catch(() => ({ error: 'Presign failed' }));
-        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: err.error } : x));
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Register failed' }));
+        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: err.error || 'Register failed' } : x));
         return;
       }
-
-      const { presignedUrl, mediaId } = await presignRes.json();
-
-      // Step 2: Upload directly to R2 (bypasses Vercel body limit entirely)
-      const uploadRes = await fetch(presignedUrl, {
-        method: 'PUT',
-        body: f.file,
-      });
-
-      if (!uploadRes.ok) {
-        const statusText = await uploadRes.text().catch(() => '');
-        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: `Upload failed (${uploadRes.status})` } : x));
-        return;
-      }
-
-      // Step 3: Confirm upload and trigger processing
-      await fetch('/api/upload/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mediaId }),
-      });
 
       setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'processing' as const, mediaId } : x));
     } catch (err) {
@@ -163,7 +163,7 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
           {dragging ? 'Drop files here' : 'Drag & drop photos and videos'}
         </p>
         <p className="mt-1 text-xs text-zinc-500">
-          JPEG, PNG, WebP, HEIC, MP4, MOV — any size, direct cloud upload
+          JPEG, PNG, WebP, HEIC, MP4, MOV — photos and videos up to 50MB
         </p>
       </div>
 

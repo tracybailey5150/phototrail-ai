@@ -73,7 +73,7 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
         ) : detail ? (
           <div className="space-y-4 max-h-[70vh] overflow-y-auto">
             {/* Preview */}
-            <img src={`/api/media/thumb/${selected}`} alt="" className="w-full rounded-lg max-h-80 object-contain bg-black" />
+            {selectedItem?.thumbnail_path && <img src={`https://wwnvebnfjeemaakieqei.supabase.co/storage/v1/object/public/derivatives/${selectedItem.thumbnail_path}`} alt="" className="w-full rounded-lg max-h-80 object-contain bg-black" />}
 
             {/* Editable name */}
             <div className="flex items-center gap-2">
@@ -180,7 +180,9 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
 
 function MediaCard({ item, onClick }: { item: MediaItem; onClick: () => void }) {
   // Use proxy API for thumbnails — guaranteed to work regardless of browser cache or CORS
-  const thumbnailUrl = item.thumbnail_path ? `/api/media/thumb/${item.id}` : null;
+  const thumbnailUrl = item.thumbnail_path
+    ? `https://wwnvebnfjeemaakieqei.supabase.co/storage/v1/object/public/derivatives/${item.thumbnail_path}`
+    : null;
 
   return (
     <div

@@ -270,19 +270,19 @@ export async function processMediaItem(mediaItemId: string): Promise<ProcessResu
       }
     }
 
-    // Step 6: OCR + AI Visual Analysis (only for images with preview)
+    // Step 6: OCR + AI Visual Analysis (only for images)
     if (isImage(item.original_mime_type)) {
-      // Get the preview image for AI (smaller, faster)
-      const { data: currentItem } = await admin.from('media_items').select('preview_path, collection_id').eq('id', mediaItemId).single();
-      const { data: coll } = await admin.from('collections').select('mode, name, client_name, site_address').eq('id', currentItem?.collection_id || item.collection_id).single();
+      const { data: coll } = await admin.from('collections').select('mode, name, client_name, site_address').eq('id', item.collection_id).single();
 
+      // Use original buffer directly for AI — resize in memory for efficiency
       let analysisBase64: string | null = null;
-      if (currentItem?.preview_path) {
-        const { data: previewFile } = await admin.storage.from('derivatives').download(currentItem.preview_path);
-        if (previewFile) {
-          const previewBuf = Buffer.from(await previewFile.arrayBuffer());
-          analysisBase64 = previewBuf.toString('base64');
-        }
+      try {
+        const { generatePreview } = await import('./thumbnails');
+        const preview = await generatePreview(buffer, 1024);
+        analysisBase64 = preview.buffer.toString('base64');
+      } catch {
+        // Fallback: use original buffer directly (may be large)
+        analysisBase64 = buffer.toString('base64');
       }
 
       if (analysisBase64) {

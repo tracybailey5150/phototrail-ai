@@ -104,6 +104,9 @@ export interface MediaItem {
   needs_review: boolean;
   is_screenshot: boolean;
   exif_data: Record<string, unknown> | null;
+  contributor_id: string | null;
+  contributor_name: string | null;
+  contributed_via: string | null;
   created_at: string;
   updated_at: string;
 }

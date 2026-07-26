@@ -194,6 +194,14 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
                 </>
               )}
 
+              {/* Contributor info */}
+              {selectedItem?.contributor_name && (
+                <div className="flex items-center gap-2 text-xs text-zinc-500 mt-2 pt-2 border-t border-zinc-700/50">
+                  <span className="text-amber-400">👤</span>
+                  <span>Contributed by <strong className="text-zinc-300">{selectedItem.contributor_name}</strong></span>
+                </div>
+              )}
+
               {/* Deep Research Results — only for this image */}
               {currentResearch && (
                 <div className="mt-4 pt-4 border-t border-zinc-700">

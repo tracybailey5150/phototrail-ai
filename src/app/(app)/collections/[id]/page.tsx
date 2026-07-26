@@ -121,6 +121,15 @@ export default function CollectionDetailPage() {
               <Badge variant="success">{collection.status}</Badge>
             </div>
             <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={async () => {
+                const res = await fetch(`/api/collections/${id}/share`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                if (res.ok) {
+                  const { url } = await res.json();
+                  const fullUrl = `${window.location.origin}${url}`;
+                  await navigator.clipboard.writeText(fullUrl);
+                  alert(`Share link copied!\n\n${fullUrl}\n\nAnyone with this link can sign in and contribute photos.`);
+                }
+              }}>Share</Button>
               <Button variant="ghost" size="sm" onClick={startEdit}>Edit</Button>
               <Button variant="danger" size="sm" onClick={deleteCollection}>Delete</Button>
             </div>

@@ -156,8 +156,8 @@ export default function SharePage() {
                 {(collection?.mode as string) === 'travel' ? 'Travel & Life' : 'Project & Job Site'}
               </Badge>
             </div>
-            <CardTitle className="mt-2">{collection?.name as string}</CardTitle>
-            {collection?.description && <CardDescription>{String(collection.description)}</CardDescription>}
+            <CardTitle className="mt-2">{String(collection?.name || '')}</CardTitle>
+            {collection?.description ? <CardDescription>{String(collection.description)}</CardDescription> : null}
           </CardHeader>
           <p className="text-sm text-zinc-400">
             You&apos;ve been invited to contribute photos to this collection.

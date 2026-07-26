@@ -107,10 +107,18 @@ export async function PATCH(request: Request) {
   }
 
   const body = await request.json();
-  const { name } = body;
+  const { name, ai_context } = body;
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (name) updates.name = name;
+
+  // Merge ai_context into existing settings JSONB
+  if (ai_context) {
+    const { data: current } = await admin.from('organizations').select('settings').eq('id', profile.org_id).single();
+    const settings = (current?.settings || {}) as Record<string, unknown>;
+    settings.ai_context = ai_context;
+    updates.settings = settings;
+  }
 
   const { data: org, error } = await admin
     .from('organizations')

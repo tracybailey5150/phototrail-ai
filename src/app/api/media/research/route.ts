@@ -53,11 +53,22 @@ export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return NextResponse.json({ error: 'AI not configured' }, { status: 500 });
 
-  // Build rich context from all available data
+  // Get global AI context from org settings
+  const { data: org } = await admin.from('organizations').select('settings').eq('id', profile.org_id).single();
+  const aiCtx = ((org?.settings || {}) as Record<string, unknown>).ai_context as Record<string, string> | undefined;
+
+  // Build rich context from all available data + global AI context
   const captureTime = item.capture_time || timestamp?.best_capture_time;
   const timeSource = item.capture_time_source || timestamp?.capture_time_source;
 
   const context = [
+    // Global AI context from Settings
+    aiCtx?.default_location ? `User's home base / default location: ${aiCtx.default_location}` : '',
+    aiCtx?.location_hints ? `Location hints from user: ${aiCtx.location_hints}` : '',
+    aiCtx?.travel_context ? `Travel context from user: ${aiCtx.travel_context}` : '',
+    aiCtx?.time_period ? `Time period from user: ${aiCtx.time_period}` : '',
+    aiCtx?.custom_instructions ? `Custom instructions from user: ${aiCtx.custom_instructions}` : '',
+    // Per-image data
     existingAnalysis?.summary ? `Initial AI description: ${existingAnalysis.summary}` : '',
     existingAnalysis?.scene_type ? `Scene type: ${existingAnalysis.scene_type}` : '',
     captureTime ? `Date/Time photo was taken: ${new Date(captureTime).toLocaleString('en-US', { timeZone: timestamp?.capture_timezone || 'America/Chicago', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })} (source: ${timeSource || 'unknown'})` : '',

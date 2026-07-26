@@ -2,7 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { computeSha256 } from './hash';
 import { extractMetadata } from './exif';
 import { generateThumbnail, generatePreview, getImageDimensions } from './thumbnails';
-import { isImage, isScreenshot } from './detect';
+import { isImage, isVideo, isScreenshot } from './detect';
 import { reverseGeocode, lookupTimezone } from './geocode';
 import { resolveTimestamp, inferDateFromFilename } from './timestamp';
 import { analyzeImage, extractOcr } from './ai-analysis';
@@ -26,7 +26,49 @@ export async function processMediaItem(mediaItemId: string): Promise<ProcessResu
     const { data: item } = await admin.from('media_items').select('*').eq('id', mediaItemId).single();
     if (!item) return { success: false, error: 'Media item not found' };
 
-    // Download original from storage (Supabase or R2)
+    // Video files — skip image processing, just record metadata
+    if (isVideo(item.original_mime_type)) {
+      await updateStep(admin, mediaItemId, item.org_id, 'hash', 'skipped', undefined, { reason: 'Video file' });
+      await updateStep(admin, mediaItemId, item.org_id, 'exif', 'skipped', undefined, { reason: 'Video file' });
+      await updateStep(admin, mediaItemId, item.org_id, 'thumbnails', 'skipped', undefined, { reason: 'Video file — thumbnail generation not yet supported' });
+
+      // Try to infer date from filename
+      const { inferDateFromFilename } = await import('./timestamp');
+      const filenameDate = inferDateFromFilename(item.original_filename);
+      if (filenameDate) {
+        await admin.from('media_items').update({
+          capture_time: filenameDate.toISOString(),
+          capture_time_source: 'filename_inference',
+        }).eq('id', mediaItemId);
+      }
+      await updateStep(admin, mediaItemId, item.org_id, 'timestamp', 'completed', undefined, {
+        source: filenameDate ? 'filename_inference' : 'upload_time',
+      });
+
+      await updateStep(admin, mediaItemId, item.org_id, 'geocode', 'skipped', undefined, { reason: 'Video file' });
+      await updateStep(admin, mediaItemId, item.org_id, 'ocr', 'skipped', undefined, { reason: 'Video file' });
+      await updateStep(admin, mediaItemId, item.org_id, 'ai_analysis', 'skipped', undefined, { reason: 'Video file — frame extraction not yet supported' });
+
+      await admin.from('media_items').update({
+        detected_mime_type: item.original_mime_type,
+        processing_status: 'completed',
+        processing_completed_at: new Date().toISOString(),
+      }).eq('id', mediaItemId);
+
+      // Update collection item count
+      const { count } = await admin.from('media_items')
+        .select('*', { count: 'exact', head: true })
+        .eq('collection_id', item.collection_id)
+        .eq('is_duplicate', false);
+      await admin.from('collections').update({
+        item_count: count || 0,
+        updated_at: new Date().toISOString(),
+      }).eq('id', item.collection_id);
+
+      return { success: true };
+    }
+
+    // Download original from storage (Supabase or R2) — images only
     let buffer: Buffer;
     const isR2 = item.original_storage_path.startsWith('phototrail/');
 

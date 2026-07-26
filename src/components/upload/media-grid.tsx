@@ -74,13 +74,28 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
           <div className="flex justify-center py-8"><div className="animate-spin h-8 w-8 border-2 border-amber-500 border-t-transparent rounded-full" /></div>
         ) : detail ? (
           <div className="space-y-4 max-h-[70vh] overflow-y-auto">
-            {/* Full-res image from signed URL, fallback to thumbnail */}
-            {((detail as { urls?: { original?: string } }).urls?.original || selectedItem?.thumbnail_path) && (
-              <img
-                src={(detail as { urls?: { original?: string } }).urls?.original || `https://wwnvebnfjeemaakieqei.supabase.co/storage/v1/object/public/derivatives/${selectedItem?.thumbnail_path}`}
-                alt=""
-                style={{ width: '100%', maxHeight: '70vh', objectFit: 'contain', display: 'block', background: '#000', borderRadius: 8 }}
-              />
+            {/* Full-res image or video player */}
+            {selectedItem?.original_mime_type?.startsWith('video/') ? (
+              (detail as { urls?: { original?: string } }).urls?.original ? (
+                <video
+                  src={(detail as { urls: { original: string } }).urls.original}
+                  controls
+                  playsInline
+                  style={{ width: '100%', maxHeight: '70vh', display: 'block', background: '#000', borderRadius: 8 }}
+                />
+              ) : (
+                <div className="flex items-center justify-center py-12 bg-zinc-800 rounded-lg">
+                  <span className="text-4xl">🎬</span>
+                </div>
+              )
+            ) : (
+              ((detail as { urls?: { original?: string } }).urls?.original || selectedItem?.thumbnail_path) && (
+                <img
+                  src={(detail as { urls?: { original?: string } }).urls?.original || `https://wwnvebnfjeemaakieqei.supabase.co/storage/v1/object/public/derivatives/${selectedItem?.thumbnail_path}`}
+                  alt=""
+                  style={{ width: '100%', maxHeight: '70vh', objectFit: 'contain', display: 'block', background: '#000', borderRadius: 8 }}
+                />
+              )
             )}
 
             {/* Editable name */}
@@ -255,11 +270,16 @@ function MediaCard({ item, onClick }: { item: MediaItem; onClick: () => void }) 
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
         />
       ) : (
-        <div className="w-full h-full flex items-center justify-center">
+        <div className="w-full h-full flex items-center justify-center flex-col gap-1">
           {item.processing_status === 'pending' || item.processing_status === 'processing' ? (
             <div className="animate-spin h-6 w-6 border-2 border-amber-500 border-t-transparent rounded-full" />
           ) : item.processing_status === 'failed' ? (
             <span className="text-red-400 text-xs">Failed</span>
+          ) : item.original_mime_type?.startsWith('video/') ? (
+            <>
+              <span className="text-3xl">🎬</span>
+              <span className="text-zinc-500 text-[10px]">Video</span>
+            </>
           ) : (
             <span className="text-zinc-600 text-xs text-center px-2">{item.original_filename}</span>
           )}

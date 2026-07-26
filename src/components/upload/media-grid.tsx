@@ -20,6 +20,8 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState('');
+  const [manualDate, setManualDate] = useState('');
+  const [savingDate, setSavingDate] = useState(false);
 
   const openDetail = async (id: string) => {
     setSelected(id);
@@ -134,18 +136,22 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
                 <div className="flex gap-2">
                   <input
                     type="datetime-local"
+                    value={manualDate}
+                    onChange={(e) => setManualDate(e.target.value)}
                     className="flex-1 px-3 py-1.5 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 outline-none focus:ring-2 focus:ring-amber-500"
-                    onChange={async (e) => {
-                      if (!e.target.value || !selected) return;
-                      await fetch(`/api/media/${selected}`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ capture_time: new Date(e.target.value).toISOString(), capture_time_source: 'user_confirmed' }),
-                      });
-                      const res = await fetch(`/api/media/${selected}`);
-                      if (res.ok) setDetail(await res.json());
-                    }}
                   />
+                  <Button size="sm" loading={savingDate} onClick={async () => {
+                    if (!manualDate || !selected) return;
+                    setSavingDate(true);
+                    await fetch(`/api/media/${selected}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ capture_time: new Date(manualDate).toISOString(), capture_time_source: 'user_confirmed' }),
+                    });
+                    const res = await fetch(`/api/media/${selected}`);
+                    if (res.ok) setDetail(await res.json());
+                    setSavingDate(false);
+                  }}>Save Date</Button>
                 </div>
               </div>
             </div>

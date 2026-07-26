@@ -90,11 +90,19 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
               )
             ) : (
               ((detail as { urls?: { original?: string } }).urls?.original || selectedItem?.thumbnail_path) && (
-                <img
-                  src={(detail as { urls?: { original?: string } }).urls?.original || `https://wwnvebnfjeemaakieqei.supabase.co/storage/v1/object/public/derivatives/${selectedItem?.thumbnail_path}`}
-                  alt=""
-                  style={{ width: '100%', maxHeight: '70vh', objectFit: 'contain', display: 'block', background: '#000', borderRadius: 8 }}
-                />
+                <a
+                  href={(detail as { urls?: { original?: string } }).urls?.original || `https://wwnvebnfjeemaakieqei.supabase.co/storage/v1/object/public/derivatives/${selectedItem?.thumbnail_path}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Click to open full resolution in new tab"
+                >
+                  <img
+                    src={(detail as { urls?: { original?: string } }).urls?.original || `https://wwnvebnfjeemaakieqei.supabase.co/storage/v1/object/public/derivatives/${selectedItem?.thumbnail_path}`}
+                    alt=""
+                    style={{ width: '100%', maxHeight: '70vh', objectFit: 'contain', display: 'block', background: '#000', borderRadius: 8, cursor: 'pointer' }}
+                  />
+                  <p className="text-center text-xs text-zinc-600 mt-1">Click image to open full resolution</p>
+                </a>
               )
             )}
 

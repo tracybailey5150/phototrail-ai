@@ -74,6 +74,29 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   });
 }
 
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const admin = createAdminClient();
+  const { data: profile } = await admin.from('profiles').select('org_id').eq('id', user.id).single();
+  if (!profile?.org_id) return NextResponse.json({ error: 'No organization' }, { status: 400 });
+
+  const body = await request.json();
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (body.original_filename) updates.original_filename = body.original_filename;
+
+  const { error } = await admin.from('media_items')
+    .update(updates)
+    .eq('id', id)
+    .eq('org_id', profile.org_id);
+
+  if (error) return NextResponse.json({ error: 'Update failed' }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
+
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();

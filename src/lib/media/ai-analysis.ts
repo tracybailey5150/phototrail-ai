@@ -50,15 +50,17 @@ interface AnalysisResult {
 }
 
 const BASE_SCHEMA = `{
-  "summary": "Brief description of what's in the image",
-  "scene_type": "e.g. landscape, portrait, equipment, room, food, event",
+  "summary": "Detailed description — name specific buildings, landmarks, streets, venues, people, and activities. Be thorough. If you recognize a city skyline, name the individual buildings visible. If it's a restaurant, name it. If there are signs, read them.",
+  "scene_type": "e.g. landscape, portrait, equipment, room, food, event, cityscape, architecture, nature",
   "indoor_outdoor": "indoor|outdoor|mixed",
   "lighting": "natural|artificial|mixed|low_light",
   "time_of_day_visual": "morning|midday|afternoon|evening|night|unknown",
+  "estimated_date_time": "If you can estimate when this was taken from visual clues (season, light, events), provide your best guess as YYYY-MM-DD or YYYY-MM format. Leave empty if unsure.",
+  "estimated_location": "If you can identify the city, neighborhood, or specific place from visual clues, provide it here. Be specific — e.g. 'Chicago Loop, near Willis Tower' not just 'city'.",
   "activities": ["list of activities visible"],
-  "objects": ["notable objects"],
-  "visible_text": ["any readable text, signs, labels"],
-  "location_candidates": ["possible location names"],
+  "objects": ["notable objects — be specific with brands, models, types"],
+  "visible_text": ["any readable text, signs, labels, street names"],
+  "location_candidates": ["specific location names — name buildings, intersections, landmarks"],
   "event_candidates": ["possible event names"],
   "quality": { "sharpness": 0-10, "exposure": 0-10, "composition": 0-10, "overall": 0-10 },
   "confidence": 0.0-1.0,
@@ -113,6 +115,9 @@ ${BASE_SCHEMA.slice(0, -1)}${extension}
 
 Important rules:
 - Return ONLY the JSON object, no markdown, no explanation
+- BE VERY DETAILED in the summary — name every building, landmark, street, bridge, sign, and venue you can identify
+- If you recognize a city skyline, name the specific buildings visible (e.g. "Willis Tower", "John Hancock Center", "Tribune Tower")
+- If you can estimate when/where this was taken from visual clues, fill in estimated_date_time and estimated_location
 - For equipment serial numbers and MAC addresses, preserve EXACT characters — do not correct ambiguous characters (0/O, 1/I, 5/S, 8/B)
 - Set confidence based on how certain you are about the analysis
 - Leave fields as empty arrays or empty strings if not applicable`;
@@ -126,7 +131,7 @@ Important rules:
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: 'claude-opus-4-6',
         max_tokens: 2048,
         messages: [{
           role: 'user',
@@ -187,7 +192,7 @@ export async function extractOcr(imageBase64: string): Promise<{ texts: string[]
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: 'claude-opus-4-6',
         max_tokens: 1024,
         messages: [{
           role: 'user',

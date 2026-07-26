@@ -18,10 +18,13 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [newName, setNewName] = useState('');
 
   const openDetail = async (id: string) => {
     setSelected(id);
     setLoadingDetail(true);
+    setEditingName(false);
     try {
       const res = await fetch(`/api/media/${id}`);
       if (res.ok) setDetail(await res.json());
@@ -37,6 +40,20 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
     onDelete?.(id);
   };
 
+  const handleRename = async (id: string) => {
+    if (!newName.trim()) return;
+    await fetch(`/api/media/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ original_filename: newName.trim() }),
+    });
+    // Refresh detail
+    const res = await fetch(`/api/media/${id}`);
+    if (res.ok) setDetail(await res.json());
+    setEditingName(false);
+    onDelete?.(id); // triggers parent refresh
+  };
+
   if (!items.length) return null;
 
   const selectedItem = items.find(i => i.id === selected);
@@ -50,15 +67,30 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
       </div>
 
       {/* Detail Modal */}
-      <Modal open={!!selected} onClose={() => { setSelected(null); setDetail(null); }} title={selectedItem?.original_filename || 'Photo Detail'} maxWidth="max-w-3xl">
+      <Modal open={!!selected} onClose={() => { setSelected(null); setDetail(null); setEditingName(false); }} title={editingName ? undefined : (selectedItem?.original_filename || 'Photo Detail')} maxWidth="max-w-3xl">
         {loadingDetail ? (
           <div className="flex justify-center py-8"><div className="animate-spin h-8 w-8 border-2 border-amber-500 border-t-transparent rounded-full" /></div>
         ) : detail ? (
           <div className="space-y-4 max-h-[70vh] overflow-y-auto">
             {/* Preview */}
-            {(detail as { urls?: { preview?: string } }).urls?.preview && (
-              <img src={(detail as { urls: { preview: string } }).urls.preview} alt="" className="w-full rounded-lg max-h-80 object-contain bg-black" />
-            )}
+            <img src={`/api/media/thumb/${selected}`} alt="" className="w-full rounded-lg max-h-80 object-contain bg-black" />
+
+            {/* Editable name */}
+            <div className="flex items-center gap-2">
+              {editingName ? (
+                <div className="flex gap-2 flex-1">
+                  <input className="flex-1 px-3 py-1.5 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 outline-none focus:ring-2 focus:ring-amber-500" value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleRename(selected!)} autoFocus />
+                  <Button size="sm" onClick={() => handleRename(selected!)}>Save</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditingName(false)}>Cancel</Button>
+                </div>
+              ) : (
+                <>
+                  <h3 className="text-base font-semibold text-zinc-100 flex-1">{selectedItem?.original_filename}</h3>
+                  <button onClick={() => { setNewName(selectedItem?.original_filename || ''); setEditingName(true); }} className="text-xs text-zinc-500 hover:text-amber-400">Rename</button>
+                  <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/api/media/thumb/${selected}`); alert('Image link copied!'); }} className="text-xs text-zinc-500 hover:text-amber-400">Share</button>
+                </>
+              )}
+            </div>
 
             {/* AI Summary */}
             {(detail as { aiAnalysis?: { summary?: string } }).aiAnalysis?.summary && (
@@ -147,9 +179,8 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
 }
 
 function MediaCard({ item, onClick }: { item: MediaItem; onClick: () => void }) {
-  const thumbnailUrl = item.thumbnail_path
-    ? `${SB}/storage/v1/object/public/derivatives/${item.thumbnail_path}`
-    : null;
+  // Use proxy API for thumbnails — guaranteed to work regardless of browser cache or CORS
+  const thumbnailUrl = item.thumbnail_path ? `/api/media/thumb/${item.id}` : null;
 
   return (
     <div

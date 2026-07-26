@@ -157,7 +157,7 @@ export default function SharePage() {
               </Badge>
             </div>
             <CardTitle className="mt-2">{collection?.name as string}</CardTitle>
-            {collection?.description && <CardDescription>{collection.description as string}</CardDescription>}
+            {collection?.description && <CardDescription>{String(collection.description)}</CardDescription>}
           </CardHeader>
           <p className="text-sm text-zinc-400">
             You&apos;ve been invited to contribute photos to this collection.

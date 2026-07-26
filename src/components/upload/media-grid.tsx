@@ -26,7 +26,7 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
   const [editDesc, setEditDesc] = useState('');
   const [savingDesc, setSavingDesc] = useState(false);
   const [researching, setResearching] = useState(false);
-  const [deepResearch, setDeepResearch] = useState<string | null>(null);
+  const [deepResearch, setDeepResearch] = useState<Record<string, string>>({});
 
   const openDetail = async (id: string) => {
     setSelected(id);
@@ -139,7 +139,6 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
                   <Button size="sm" variant="secondary" loading={researching} onClick={async () => {
                     if (!selected) return;
                     setResearching(true);
-                    setDeepResearch(null);
                     try {
                       const res = await fetch('/api/media/research', {
                         method: 'POST',
@@ -148,7 +147,7 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
                       });
                       if (res.ok) {
                         const data = await res.json();
-                        setDeepResearch(data.research);
+                        setDeepResearch(prev => ({ ...prev, [selected!]: data.research }));
                       }
                     } catch {}
                     setResearching(false);
@@ -194,11 +193,11 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
                 </>
               )}
 
-              {/* Deep Research Results */}
-              {deepResearch && (
+              {/* Deep Research Results — per image */}
+              {selected && deepResearch[selected] && (
                 <div className="mt-4 pt-4 border-t border-zinc-700">
                   <h5 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-2">🔍 Deep Research</h5>
-                  <div className="text-sm text-zinc-200 whitespace-pre-wrap leading-relaxed">{deepResearch}</div>
+                  <div className="text-sm text-zinc-200 whitespace-pre-wrap leading-relaxed">{deepResearch[selected]}</div>
                 </div>
               )}
             </div>

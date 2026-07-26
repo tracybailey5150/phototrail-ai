@@ -87,6 +87,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const body = await request.json();
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (body.original_filename) updates.original_filename = body.original_filename;
+  if (body.capture_time) updates.capture_time = body.capture_time;
+  if (body.capture_time_source) updates.capture_time_source = body.capture_time_source;
 
   const { error } = await admin.from('media_items')
     .update(updates)

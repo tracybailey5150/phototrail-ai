@@ -118,16 +118,61 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
               </div>
             )}
 
-            {/* Timestamp */}
-            {(detail as { timestamp?: { best_capture_time?: string; capture_time_source?: string } }).timestamp?.best_capture_time && (
-              <div className="bg-zinc-800/50 rounded-lg p-4">
-                <h4 className="text-xs font-semibold text-purple-400 uppercase tracking-wider mb-1">Capture Time</h4>
-                <p className="text-sm text-zinc-200">{new Date((detail as { timestamp: { best_capture_time: string } }).timestamp.best_capture_time).toLocaleString()}</p>
-                <span className="text-xs text-zinc-500">Source: {(detail as { timestamp: { capture_time_source: string } }).timestamp.capture_time_source}</span>
+            {/* Timestamp + Manual Date Edit */}
+            <div className="bg-zinc-800/50 rounded-lg p-4">
+              <h4 className="text-xs font-semibold text-purple-400 uppercase tracking-wider mb-2">Date Taken</h4>
+              {(detail as { timestamp?: { best_capture_time?: string; capture_time_source?: string } }).timestamp?.best_capture_time ? (
+                <>
+                  <p className="text-sm text-zinc-200">{new Date((detail as { timestamp: { best_capture_time: string } }).timestamp.best_capture_time).toLocaleString()}</p>
+                  <span className="text-xs text-zinc-500">Source: {(detail as { timestamp: { capture_time_source: string } }).timestamp.capture_time_source}</span>
+                </>
+              ) : (
+                <p className="text-sm text-zinc-500">No capture date detected</p>
+              )}
+              <div className="mt-2">
+                <label className="text-xs text-zinc-500 block mb-1">Set date manually:</label>
+                <div className="flex gap-2">
+                  <input
+                    type="datetime-local"
+                    className="flex-1 px-3 py-1.5 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-200 outline-none focus:ring-2 focus:ring-amber-500"
+                    onChange={async (e) => {
+                      if (!e.target.value || !selected) return;
+                      await fetch(`/api/media/${selected}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ capture_time: new Date(e.target.value).toISOString(), capture_time_source: 'user_confirmed' }),
+                      });
+                      const res = await fetch(`/api/media/${selected}`);
+                      if (res.ok) setDetail(await res.json());
+                    }}
+                  />
+                </div>
               </div>
-            )}
+            </div>
 
-            {/* EXIF */}
+            {/* GPS / Location */}
+            <div className="bg-zinc-800/50 rounded-lg p-4">
+              <h4 className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-2">Location</h4>
+              {selectedItem?.gps_latitude ? (
+                <div className="text-sm text-zinc-200">
+                  <p>{selectedItem.gps_latitude.toFixed(6)}, {selectedItem.gps_longitude?.toFixed(6)}</p>
+                  {(detail as { location?: { city?: string; place_name?: string; state_province?: string; country?: string } }).location?.city && (
+                    <p className="text-zinc-400 mt-1">
+                      {[(detail as { location: { place_name?: string } }).location.place_name, (detail as { location: { city?: string } }).location.city, (detail as { location: { state_province?: string } }).location.state_province, (detail as { location: { country?: string } }).location.country].filter(Boolean).join(', ')}
+                    </p>
+                  )}
+                </div>
+              ) : (detail as { aiAnalysis?: { estimated_location?: string } }).aiAnalysis?.estimated_location ? (
+                <div>
+                  <p className="text-sm text-zinc-200">{(detail as { aiAnalysis: { estimated_location: string } }).aiAnalysis.estimated_location}</p>
+                  <span className="text-xs text-amber-400">AI estimated (no GPS data)</span>
+                </div>
+              ) : (
+                <p className="text-sm text-zinc-500">No location data</p>
+              )}
+            </div>
+
+            {/* File Info */}
             {selectedItem && (
               <div className="bg-zinc-800/50 rounded-lg p-4">
                 <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1">File Info</h4>
@@ -136,6 +181,7 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
                   {selectedItem.width && <span>Dimensions: {selectedItem.width} x {selectedItem.height}</span>}
                   <span>Type: {selectedItem.original_mime_type}</span>
                   <span>Status: {selectedItem.processing_status}</span>
+                  <span>Uploaded: {new Date(selectedItem.upload_time).toLocaleString()}</span>
                 </div>
               </div>
             )}
@@ -187,14 +233,14 @@ function MediaCard({ item, onClick }: { item: MediaItem; onClick: () => void }) 
   return (
     <div
       onClick={onClick}
-      className="group relative aspect-square bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden cursor-pointer hover:border-amber-500/50 transition-colors"
+      className="group relative bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden cursor-pointer hover:border-amber-500/50 transition-colors"
+      style={{ aspectRatio: '1/1', minHeight: 120 }}
     >
       {thumbnailUrl ? (
         <img
           src={thumbnailUrl}
           alt={item.original_filename}
-          className="w-full h-full object-cover"
-          loading="lazy"
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center">

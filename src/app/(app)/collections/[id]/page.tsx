@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { DropZone } from '@/components/upload/drop-zone';
 import { MediaGrid } from '@/components/upload/media-grid';
 import type { Collection, MediaItem } from '@/types/database';
@@ -12,9 +14,14 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://wwnvebnfje
 
 export default function CollectionDetailPage() {
   const { id } = useParams();
+  const router = useRouter();
   const [collection, setCollection] = useState<Collection | null>(null);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const fetchData = useCallback(() => {
     Promise.all([
@@ -74,19 +81,68 @@ export default function CollectionDetailPage() {
   const withDate = mediaItems.filter((m) => m.capture_time != null);
   const duplicates = mediaItems.filter((m) => m.is_duplicate);
 
+  const startEdit = () => {
+    setEditName(collection.name);
+    setEditDesc(collection.description || '');
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    setSaving(true);
+    const res = await fetch(`/api/collections/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: editName, description: editDesc || undefined }),
+    });
+    if (res.ok) {
+      const { collection: updated } = await res.json();
+      setCollection(updated);
+      setEditing(false);
+    }
+    setSaving(false);
+  };
+
+  const deleteCollection = async () => {
+    if (!confirm('Delete this collection and all its photos? This cannot be undone.')) return;
+    const res = await fetch(`/api/collections/${id}`, { method: 'DELETE' });
+    if (res.ok) router.push('/collections');
+  };
+
   return (
     <div className="max-w-6xl space-y-6">
       {/* Collection header */}
       <Card>
         <CardHeader>
-          <div className="flex items-center gap-3">
-            <Badge variant={collection.mode === 'travel' ? 'travel' : 'project'}>
-              {collection.mode === 'travel' ? 'Travel & Life' : 'Project & Job Site'}
-            </Badge>
-            <Badge variant="success">{collection.status}</Badge>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Badge variant={collection.mode === 'travel' ? 'travel' : 'project'}>
+                {collection.mode === 'travel' ? 'Travel & Life' : 'Project & Job Site'}
+              </Badge>
+              <Badge variant="success">{collection.status}</Badge>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={startEdit}>Edit</Button>
+              <Button variant="danger" size="sm" onClick={deleteCollection}>Delete</Button>
+            </div>
           </div>
-          <CardTitle className="text-2xl mt-2">{collection.name}</CardTitle>
-          {collection.description && <CardDescription>{collection.description}</CardDescription>}
+          {editing ? (
+            <div className="mt-3 space-y-3">
+              <Input label="Name" value={editName} onChange={e => setEditName(e.target.value)} />
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-zinc-300">Description</label>
+                <textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={2} className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none" />
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={saveEdit} loading={saving}>Save</Button>
+                <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <CardTitle className="text-2xl mt-2">{collection.name}</CardTitle>
+              {collection.description && <CardDescription>{collection.description}</CardDescription>}
+            </>
+          )}
         </CardHeader>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
@@ -139,7 +195,7 @@ export default function CollectionDetailPage() {
               <span className="text-red-400 ml-2">({failedItems.length} failed)</span>
             )}
           </h2>
-          <MediaGrid items={mediaItems} supabaseUrl={SUPABASE_URL} />
+          <MediaGrid items={mediaItems} onDelete={(id) => { setMediaItems(prev => prev.filter(m => m.id !== id)); fetchData(); }} />
         </div>
       )}
     </div>

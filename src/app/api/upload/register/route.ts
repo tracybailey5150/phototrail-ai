@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { logActivity } from '@/lib/activity';
-import { processMediaItem } from '@/lib/media/process';
 
 export const maxDuration = 60;
 
@@ -50,9 +49,6 @@ export async function POST(request: Request) {
     entityType: 'collection',
     entityId: collectionId,
   });
-
-  // Trigger processing in background
-  processMediaItem(mediaId).catch(() => {});
 
   return NextResponse.json({ ok: true, mediaId });
 }

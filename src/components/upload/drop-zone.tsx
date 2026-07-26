@@ -85,6 +85,25 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
       }
 
       setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'processing' as const, mediaId } : x));
+
+      // Step 3: Trigger processing synchronously (separate request with 120s timeout)
+      const processRes = await fetch('/api/media/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaId }),
+      });
+
+      if (processRes.ok) {
+        const result = await processRes.json();
+        setFiles((prev) => prev.map((x) => x.id === f.id ? {
+          ...x,
+          status: result.success ? 'done' as const : 'error' as const,
+          error: result.error || undefined,
+        } : x));
+      } else {
+        // Processing failed but file is uploaded — mark as done anyway
+        setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'done' as const } : x));
+      }
     } catch (err) {
       const msg = err instanceof Error ? `Error: ${err.message}` : 'Network error — check connection';
       setFiles((prev) => prev.map((x) => x.id === f.id ? { ...x, status: 'error' as const, error: msg } : x));

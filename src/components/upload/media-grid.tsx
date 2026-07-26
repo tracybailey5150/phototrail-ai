@@ -26,12 +26,13 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
   const [editDesc, setEditDesc] = useState('');
   const [savingDesc, setSavingDesc] = useState(false);
   const [researching, setResearching] = useState(false);
-  const [deepResearch, setDeepResearch] = useState<Record<string, string>>({});
+  const [currentResearch, setCurrentResearch] = useState<string | null>(null);
 
   const openDetail = async (id: string) => {
     setSelected(id);
     setLoadingDetail(true);
     setEditingName(false);
+    setCurrentResearch(null);
     try {
       const res = await fetch(`/api/media/${id}`);
       if (res.ok) setDetail(await res.json());
@@ -147,7 +148,7 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
                       });
                       if (res.ok) {
                         const data = await res.json();
-                        setDeepResearch(prev => ({ ...prev, [selected!]: data.research }));
+                        setCurrentResearch(data.research);
                       }
                     } catch {}
                     setResearching(false);
@@ -193,11 +194,11 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
                 </>
               )}
 
-              {/* Deep Research Results — per image */}
-              {selected && deepResearch[selected] && (
+              {/* Deep Research Results — only for this image */}
+              {currentResearch && (
                 <div className="mt-4 pt-4 border-t border-zinc-700">
                   <h5 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-2">🔍 Deep Research</h5>
-                  <div className="text-sm text-zinc-200 whitespace-pre-wrap leading-relaxed">{deepResearch[selected]}</div>
+                  <div className="text-sm text-zinc-200 whitespace-pre-wrap leading-relaxed">{currentResearch}</div>
                 </div>
               )}
             </div>

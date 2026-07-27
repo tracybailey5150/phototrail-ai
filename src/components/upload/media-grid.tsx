@@ -323,7 +323,17 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
             ) : null}
 
             <div className="flex gap-2 pt-2">
-              <Button variant="danger" size="sm" onClick={() => handleDelete(selected!)}>Delete Photo</Button>
+              {(detail as { urls?: { original?: string } }).urls?.original && (
+                <Button variant="secondary" size="sm" onClick={() => {
+                  const url = (detail as { urls: { original: string } }).urls.original;
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = selectedItem?.original_filename || "download";
+                  a.target = "_blank";
+                  a.click();
+                }}>Download</Button>
+              )}
+              <Button variant="danger" size="sm" onClick={() => handleDelete(selected!)}>Delete</Button>
             </div>
           </div>
         ) : (

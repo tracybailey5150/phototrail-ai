@@ -4,12 +4,16 @@ import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Modal } from '@/components/ui/modal';
 import type { Collection } from '@/types/database';
 
 export default function ReportsPage() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState<string | null>(null);
+  const [report, setReport] = useState<string | null>(null);
+  const [reportTitle, setReportTitle] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
     fetch('/api/collections').then(r => r.json()).then(data => {
@@ -40,6 +44,37 @@ export default function ReportsPage() {
       downloadBlob(new Blob([csv], { type: 'text/csv' }), `collection-export-${collectionId}.csv`);
     }
     setGenerating(null);
+  };
+
+  const handleGenerateReport = async (collectionId: string, reportType: string, collectionName: string) => {
+    const label = reportType === 'trip_summary' ? 'Trip Summary' : reportType === 'field_report' ? 'Field Report' : 'Equipment Report';
+    setGenerating(`${collectionId}-${reportType}`);
+    setReportTitle(`${label} — ${collectionName}`);
+
+    try {
+      const res = await fetch('/api/reports/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection_id: collectionId, report_type: reportType }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setReport(`Error: ${data.error}`);
+      } else {
+        setReport(data.report);
+      }
+      setModalOpen(true);
+    } catch {
+      setReport('Failed to generate report. Please try again.');
+      setModalOpen(true);
+    }
+    setGenerating(null);
+  };
+
+  const handleDownloadReport = () => {
+    if (!report) return;
+    const blob = new Blob([report], { type: 'text/markdown' });
+    downloadBlob(blob, `${reportTitle.replace(/[^a-zA-Z0-9]/g, '_')}.md`);
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin h-8 w-8 border-2 border-amber-500 border-t-transparent rounded-full" /></div>;
@@ -74,12 +109,33 @@ export default function ReportsPage() {
                   Export CSV
                 </Button>
                 {c.mode === 'travel' && (
-                  <Button size="sm" variant="outline">Trip Summary</Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    loading={generating === `${c.id}-trip_summary`}
+                    onClick={() => handleGenerateReport(c.id, 'trip_summary', c.name)}
+                  >
+                    Trip Summary
+                  </Button>
                 )}
                 {c.mode === 'project' && (
                   <>
-                    <Button size="sm" variant="outline">Field Report</Button>
-                    <Button size="sm" variant="outline">Equipment Report</Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      loading={generating === `${c.id}-field_report`}
+                      onClick={() => handleGenerateReport(c.id, 'field_report', c.name)}
+                    >
+                      Field Report
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      loading={generating === `${c.id}-equipment_report`}
+                      onClick={() => handleGenerateReport(c.id, 'equipment_report', c.name)}
+                    >
+                      Equipment Report
+                    </Button>
                   </>
                 )}
               </div>
@@ -87,6 +143,24 @@ export default function ReportsPage() {
           ))}
         </div>
       )}
+
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={reportTitle} maxWidth="max-w-3xl">
+        <div className="space-y-4">
+          <div className="max-h-[60vh] overflow-y-auto">
+            <div className="whitespace-pre-wrap text-sm text-zinc-300 leading-relaxed">
+              {report}
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end pt-2 border-t border-zinc-800">
+            <Button size="sm" variant="secondary" onClick={handleDownloadReport}>
+              Download as Markdown
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setModalOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

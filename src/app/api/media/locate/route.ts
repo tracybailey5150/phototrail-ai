@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     { data: analyses },
     { data: locations },
   ] = await Promise.all([
-    admin.from('media_ai_analysis').select('media_item_id, summary, estimated_location, location_candidates, landmarks, scene_type').in('media_item_id', mediaIds),
+    admin.from('media_ai_analysis').select('media_item_id, summary, location_candidates, landmarks, scene_type, raw_response').in('media_item_id', mediaIds),
     admin.from('media_locations').select('media_item_id, city, state_province, country, place_name, landmark').in('media_item_id', mediaIds),
   ]);
 
@@ -47,9 +47,10 @@ export async function POST(request: Request) {
   for (const item of items) {
     const analysis = analysisMap.get(item.id);
     const location = locationMap.get(item.id);
+    const rawResponse = analysis?.raw_response as Record<string, unknown> | null;
 
     const parts: string[] = [];
-    if (analysis?.estimated_location) parts.push(`AI estimated location: ${analysis.estimated_location}`);
+    if (rawResponse?.estimated_location) parts.push(`AI estimated location: ${rawResponse.estimated_location}`);
     if (analysis?.location_candidates?.length) parts.push(`Location candidates: ${JSON.stringify(analysis.location_candidates)}`);
     if (analysis?.landmarks?.length) parts.push(`Landmarks: ${JSON.stringify(analysis.landmarks)}`);
     if (analysis?.summary) parts.push(`Description: ${analysis.summary}`);

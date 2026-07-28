@@ -4,21 +4,22 @@ import { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import type { MediaItem } from '@/types/database';
+import type { MapItem } from '@/app/(app)/map/page';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
-function getThumbUrl(item: MediaItem) {
+function getThumbUrl(item: MapItem) {
   return item.thumbnail_path
     ? `${SUPABASE_URL}/storage/v1/object/public/derivatives/${item.thumbnail_path}`
     : null;
 }
 
-function createPhotoIcon(thumbUrl: string | null) {
+function createPhotoIcon(thumbUrl: string | null, isAiEstimated: boolean) {
+  const borderColor = isAiEstimated ? '#3B82F6' : '#F59E0B'; // blue for AI, amber for GPS
   if (thumbUrl) {
     return L.divIcon({
       className: 'photo-marker',
-      html: `<div style="width:36px;height:36px;border-radius:50%;border:2px solid #F59E0B;overflow:hidden;background:#27272a;box-shadow:0 2px 8px rgba(0,0,0,0.5)">
+      html: `<div style="width:36px;height:36px;border-radius:50%;border:2px solid ${borderColor};overflow:hidden;background:#27272a;box-shadow:0 2px 8px rgba(0,0,0,0.5)">
         <img src="${thumbUrl}" style="width:100%;height:100%;object-fit:cover" />
       </div>`,
       iconSize: [36, 36],
@@ -26,22 +27,23 @@ function createPhotoIcon(thumbUrl: string | null) {
       popupAnchor: [0, -20],
     });
   }
+  const icon = isAiEstimated ? '🤖' : '📍';
   return L.divIcon({
     className: 'photo-marker',
-    html: `<div style="width:36px;height:36px;border-radius:50%;border:2px solid #F59E0B;background:#27272a;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,0.5)">📍</div>`,
+    html: `<div style="width:36px;height:36px;border-radius:50%;border:2px solid ${borderColor};background:#27272a;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,0.5)">${icon}</div>`,
     iconSize: [36, 36],
     iconAnchor: [18, 18],
     popupAnchor: [0, -20],
   });
 }
 
-function FitBounds({ items }: { items: MediaItem[] }) {
+function FitBounds({ items }: { items: MapItem[] }) {
   const map = useMap();
 
   useEffect(() => {
     if (items.length === 0) return;
     const bounds = L.latLngBounds(
-      items.map((i) => [i.gps_latitude!, i.gps_longitude!] as [number, number])
+      items.map((i) => [i.map_latitude, i.map_longitude] as [number, number])
     );
     map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
   }, [map, items]);
@@ -50,7 +52,7 @@ function FitBounds({ items }: { items: MediaItem[] }) {
 }
 
 interface PhotoMapProps {
-  items: MediaItem[];
+  items: MapItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
 }
@@ -60,11 +62,10 @@ export default function PhotoMap({ items, selectedId, onSelect }: PhotoMapProps)
   const [ready, setReady] = useState(false);
 
   const center: [number, number] = items.length > 0
-    ? [items[0].gps_latitude!, items[0].gps_longitude!]
-    : [36.07, -94.17]; // default: NWA
+    ? [items[0].map_latitude, items[0].map_longitude]
+    : [36.07, -94.17];
 
   useEffect(() => {
-    // Fix Leaflet default icon issue
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     delete (L.Icon.Default.prototype as any)._getIconUrl;
     L.Icon.Default.mergeOptions({
@@ -92,12 +93,12 @@ export default function PhotoMap({ items, selectedId, onSelect }: PhotoMapProps)
       <FitBounds items={items} />
       {items.map((item) => {
         const thumb = getThumbUrl(item);
-        const isSelected = item.id === selectedId;
+        const isAi = item.location_source === 'ai_estimated';
         return (
           <Marker
             key={item.id}
-            position={[item.gps_latitude!, item.gps_longitude!]}
-            icon={createPhotoIcon(thumb)}
+            position={[item.map_latitude, item.map_longitude]}
+            icon={createPhotoIcon(thumb, isAi)}
             eventHandlers={{
               click: () => onSelect(item.id),
             }}
@@ -112,9 +113,18 @@ export default function PhotoMap({ items, selectedId, onSelect }: PhotoMapProps)
                   />
                 )}
                 <p style={{ fontSize: 13, fontWeight: 600, margin: '0 0 4px' }}>{item.original_filename}</p>
-                <p style={{ fontSize: 11, color: '#a1a1aa', margin: '0 0 2px' }}>
-                  {item.gps_latitude?.toFixed(5)}, {item.gps_longitude?.toFixed(5)}
-                </p>
+                {isAi ? (
+                  <>
+                    <p style={{ fontSize: 10, color: '#3B82F6', margin: '0 0 4px', fontWeight: 500 }}>AI Estimated Location</p>
+                    {item.location_label && (
+                      <p style={{ fontSize: 11, color: '#a1a1aa', margin: '0 0 2px' }}>{item.location_label}</p>
+                    )}
+                  </>
+                ) : (
+                  <p style={{ fontSize: 11, color: '#a1a1aa', margin: '0 0 2px' }}>
+                    {item.map_latitude.toFixed(5)}, {item.map_longitude.toFixed(5)}
+                  </p>
+                )}
                 {item.capture_time && (
                   <p style={{ fontSize: 11, color: '#a1a1aa', margin: 0 }}>
                     {new Date(item.capture_time).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}

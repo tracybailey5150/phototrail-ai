@@ -116,7 +116,7 @@ ${batch.map((p, idx) => `--- Photo ${idx + 1} (id: ${p.id}) ---\nFilename: ${p.f
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6-20250514',
+          model: 'claude-sonnet-4-6',
           max_tokens: 4096,
           messages: [{ role: 'user', content: prompt }],
         }),

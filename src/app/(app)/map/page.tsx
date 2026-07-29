@@ -25,6 +25,12 @@ export default function MapPage() {
   const [locating, setLocating] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hasUnlocated, setHasUnlocated] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [locationHint, setLocationHint] = useState('');
+  const [manualLat, setManualLat] = useState('');
+  const [manualLng, setManualLng] = useState('');
+  const [relocating, setRelocating] = useState(false);
+  const [editMode, setEditMode] = useState<'hint' | 'manual'>('hint');
 
   useEffect(() => {
     fetch('/api/media').then(r => r.json()).then(data => {
@@ -78,6 +84,36 @@ export default function MapPage() {
     } catch { /* ignore */ }
     setLocating(false);
     setHasUnlocated(false);
+  };
+
+  const handleRelocate = async () => {
+    if (!selectedId) return;
+    setRelocating(true);
+
+    const body = editMode === 'hint'
+      ? { media_item_id: selectedId, mode: 'ai_hint', location_hint: locationHint }
+      : { media_item_id: selectedId, mode: 'manual', latitude: parseFloat(manualLat), longitude: parseFloat(manualLng) };
+
+    try {
+      const res = await fetch('/api/media/relocate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.latitude && data.longitude) {
+        setMapItems(prev => prev.map(item =>
+          item.id === selectedId
+            ? { ...item, map_latitude: data.latitude, map_longitude: data.longitude, gps_latitude: data.latitude, gps_longitude: data.longitude, location_source: 'gps' as const, location_label: data.location_label }
+            : item
+        ));
+        setEditing(false);
+        setLocationHint('');
+        setManualLat('');
+        setManualLng('');
+      }
+    } catch { /* ignore */ }
+    setRelocating(false);
   };
 
   const selectedItem = mapItems.find(i => i.id === selectedId) || null;
@@ -141,14 +177,91 @@ export default function MapPage() {
                       </p>
                     </>
                   ) : (
-                    <p className="text-xs text-zinc-400">
-                      {selectedItem.map_latitude.toFixed(5)}, {selectedItem.map_longitude.toFixed(5)}
-                    </p>
+                    <>
+                      {selectedItem.location_label && (
+                        <p className="text-xs text-zinc-400">{selectedItem.location_label}</p>
+                      )}
+                      <p className="text-xs text-zinc-400">
+                        {selectedItem.map_latitude.toFixed(5)}, {selectedItem.map_longitude.toFixed(5)}
+                      </p>
+                    </>
                   )}
                   {selectedItem.capture_time && (
                     <p className="text-xs text-zinc-500">
                       {new Date(selectedItem.capture_time).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
                     </p>
+                  )}
+
+                  {!editing ? (
+                    <Button size="sm" variant="outline" onClick={() => {
+                      setEditing(true);
+                      setEditMode('hint');
+                      setLocationHint('');
+                      setManualLat(selectedItem.map_latitude.toFixed(5));
+                      setManualLng(selectedItem.map_longitude.toFixed(5));
+                    }}>
+                      Edit Location
+                    </Button>
+                  ) : (
+                    <div className="space-y-2 pt-1 border-t border-zinc-800">
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => setEditMode('hint')}
+                          className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${editMode === 'hint' ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+                        >
+                          AI Hint
+                        </button>
+                        <button
+                          onClick={() => setEditMode('manual')}
+                          className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${editMode === 'manual' ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+                        >
+                          Coordinates
+                        </button>
+                      </div>
+
+                      {editMode === 'hint' ? (
+                        <input
+                          type="text"
+                          value={locationHint}
+                          onChange={e => setLocationHint(e.target.value)}
+                          placeholder="e.g. Willis Tower Skydeck"
+                          className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          onKeyDown={e => { if (e.key === 'Enter' && locationHint.trim()) handleRelocate(); }}
+                        />
+                      ) : (
+                        <div className="flex gap-1.5">
+                          <input
+                            type="text"
+                            value={manualLat}
+                            onChange={e => setManualLat(e.target.value)}
+                            placeholder="Lat"
+                            className="w-1/2 px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          />
+                          <input
+                            type="text"
+                            value={manualLng}
+                            onChange={e => setManualLng(e.target.value)}
+                            placeholder="Lng"
+                            className="w-1/2 px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          />
+                        </div>
+                      )}
+
+                      <div className="flex gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          loading={relocating}
+                          disabled={editMode === 'hint' ? !locationHint.trim() : !manualLat || !manualLng}
+                          onClick={handleRelocate}
+                        >
+                          {editMode === 'hint' ? 'Relocate' : 'Save'}
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
                   )}
                 </div>
               </Card>

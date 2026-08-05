@@ -47,16 +47,14 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
     setFiles((prev) => prev.map((x) => x.id === id ? { ...x, ...updates } : x));
   };
 
-  // Upload using XMLHttpRequest for real progress tracking
-  function uploadWithProgress(url: string, file: File, token: string, contentType: string): Promise<void> {
+  // Upload using XMLHttpRequest with FormData (matching Supabase signed URL format)
+  function uploadWithProgress(url: string, file: File, token: string, storagePath: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      const fileId = file.name; // used to find the right UploadFile
 
       xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable) {
-          const pct = Math.round((e.loaded / e.total) * 95); // 0-95%, save 5% for registration
-          // Find and update the matching file by iterating current state
+          const pct = Math.round((e.loaded / e.total) * 95);
           setFiles((prev) => prev.map((f) =>
             f.status === 'uploading' && f.file === file
               ? { ...f, progress: pct }
@@ -69,7 +67,7 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve();
         } else {
-          reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
+          reject(new Error(`Upload failed: ${xhr.status} ${xhr.responseText?.substring(0, 200) || xhr.statusText}`));
         }
       });
 
@@ -77,13 +75,16 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
       xhr.addEventListener('timeout', () => reject(new Error('Upload timed out')));
       xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
 
-      // Supabase signed URL upload: PUT with token in header
+      // Supabase signed URL expects FormData with the file appended
+      const formData = new FormData();
+      formData.append('cacheControl', '3600');
+      formData.append('', file);
+
+      // signedUrl already contains the token as a query param
       xhr.open('PUT', url);
       xhr.setRequestHeader('x-upsert', 'true');
-      xhr.setRequestHeader('authorization', `Bearer ${token}`);
-      if (contentType) xhr.setRequestHeader('content-type', contentType);
-      xhr.timeout = 600000; // 10 minute timeout for large files
-      xhr.send(file);
+      xhr.timeout = 600000; // 10 minute timeout
+      xhr.send(formData);
     });
   }
 
@@ -98,7 +99,6 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
 
       if (f.file.size > SIGNED_URL_THRESHOLD) {
         // Large file — get a signed URL and upload directly to Supabase storage
-        // No size limit, real progress bar, no server-side merge needed
         const signedRes = await fetch('/api/upload/signed-url', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -113,8 +113,8 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
 
         const { signedUrl, token } = await signedRes.json();
 
-        // Upload directly with XHR for real progress
-        await uploadWithProgress(signedUrl, f.file, token, contentType);
+        // Upload directly with XHR for real progress (FormData format for Supabase)
+        await uploadWithProgress(signedUrl, f.file, token, storagePath);
         updateFile(f.id, { progress: 97 });
 
       } else {

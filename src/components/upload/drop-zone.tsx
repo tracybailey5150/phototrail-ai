@@ -19,38 +19,8 @@ interface UploadFile {
 
 const ACCEPTED = '.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.bmp,.tiff,.mp4,.mov,.avi,.webm';
 const CONCURRENT_UPLOADS = 3;
-const CHUNK_SIZE = 3 * 1024 * 1024; // 3MB chunks (under Vercel 4.5MB body limit with FormData overhead)
-const CHUNK_THRESHOLD = 6 * 1024 * 1024; // Files over 6MB use chunked upload (mobile-friendly)
-const MAX_CHUNK_RETRIES = 3;
-
-async function uploadChunkWithRetry(
-  formData: FormData,
-  retries: number = MAX_CHUNK_RETRIES
-): Promise<Response> {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    try {
-      const res = await fetch('/api/upload/chunk', { method: 'POST', body: formData });
-      if (res.ok) return res;
-
-      // On server error, retry; on client error (4xx), don't retry
-      if (res.status < 500 && res.status >= 400) return res;
-
-      if (attempt < retries - 1) {
-        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-      } else {
-        return res;
-      }
-    } catch (err) {
-      // Network error — retry
-      if (attempt < retries - 1) {
-        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
-      } else {
-        throw err;
-      }
-    }
-  }
-  throw new Error('Max retries exceeded');
-}
+// Files over this size use signed URL upload (direct to Supabase storage, no size limit)
+const SIGNED_URL_THRESHOLD = 4 * 1024 * 1024; // 4MB
 
 export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -77,7 +47,46 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
     setFiles((prev) => prev.map((x) => x.id === id ? { ...x, ...updates } : x));
   };
 
-  // Upload a single file — small files go direct to Supabase, large files use chunked upload
+  // Upload using XMLHttpRequest for real progress tracking
+  function uploadWithProgress(url: string, file: File, token: string, contentType: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const fileId = file.name; // used to find the right UploadFile
+
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 95); // 0-95%, save 5% for registration
+          // Find and update the matching file by iterating current state
+          setFiles((prev) => prev.map((f) =>
+            f.status === 'uploading' && f.file === file
+              ? { ...f, progress: pct }
+              : f
+          ));
+        }
+      });
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+        } else {
+          reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
+        }
+      });
+
+      xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
+      xhr.addEventListener('timeout', () => reject(new Error('Upload timed out')));
+      xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
+
+      // Supabase signed URL upload: PUT with token in header
+      xhr.open('PUT', url);
+      xhr.setRequestHeader('x-upsert', 'true');
+      xhr.setRequestHeader('authorization', `Bearer ${token}`);
+      if (contentType) xhr.setRequestHeader('content-type', contentType);
+      xhr.timeout = 600000; // 10 minute timeout for large files
+      xhr.send(file);
+    });
+  }
+
   const uploadOne = async (f: UploadFile): Promise<void> => {
     updateFile(f.id, { status: 'uploading', progress: 0 });
 
@@ -85,74 +94,45 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
       const mediaId = crypto.randomUUID();
       const ext = f.file.name.split('.').pop()?.toLowerCase() || 'bin';
       const storagePath = `uploads/${collectionId}/${mediaId}.${ext}`;
+      const contentType = f.file.type || 'application/octet-stream';
 
-      if (f.file.size > CHUNK_THRESHOLD) {
-        // Chunked upload — works for any file size
-        const totalChunks = Math.ceil(f.file.size / CHUNK_SIZE);
-        const uploadId = mediaId;
-
-        // Step 1: Upload all chunks
-        for (let i = 0; i < totalChunks; i++) {
-          const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, f.file.size);
-          const chunk = f.file.slice(start, end);
-          const pct = Math.round((end / f.file.size) * 90); // 0-90% for chunks
-
-          updateFile(f.id, { progress: pct });
-
-          const formData = new FormData();
-          formData.append('chunk', chunk);
-          formData.append('chunkIndex', String(i));
-          formData.append('totalChunks', String(totalChunks));
-          formData.append('uploadId', uploadId);
-          formData.append('storagePath', storagePath);
-
-          const chunkRes = await uploadChunkWithRetry(formData);
-          if (!chunkRes.ok) {
-            const err = await chunkRes.json().catch(() => ({ error: 'Chunk failed' }));
-            updateFile(f.id, { status: 'error', error: `Chunk ${i + 1}/${totalChunks}: ${err.error}` });
-            return;
-          }
-        }
-
-        // Step 2: Merge chunks server-side (separate request with long timeout)
-        updateFile(f.id, { progress: 92 });
-        const mergeRes = await fetch('/api/upload/merge', {
+      if (f.file.size > SIGNED_URL_THRESHOLD) {
+        // Large file — get a signed URL and upload directly to Supabase storage
+        // No size limit, real progress bar, no server-side merge needed
+        const signedRes = await fetch('/api/upload/signed-url', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            uploadId,
-            totalChunks,
-            storagePath,
-            contentType: f.file.type || 'application/octet-stream',
-          }),
+          body: JSON.stringify({ storagePath }),
         });
 
-        if (!mergeRes.ok) {
-          const err = await mergeRes.json().catch(() => ({ error: 'Merge failed' }));
-          updateFile(f.id, { status: 'error', error: `Merge: ${err.error}` });
+        if (!signedRes.ok) {
+          const err = await signedRes.json().catch(() => ({ error: 'Failed to get upload URL' }));
+          updateFile(f.id, { status: 'error', error: err.error });
           return;
         }
-        updateFile(f.id, { progress: 100 });
+
+        const { signedUrl, token } = await signedRes.json();
+
+        // Upload directly with XHR for real progress
+        await uploadWithProgress(signedUrl, f.file, token, contentType);
+        updateFile(f.id, { progress: 97 });
+
       } else {
-        // Small file — direct Supabase Storage upload
+        // Small file — direct Supabase client upload
         updateFile(f.id, { progress: 50 });
         const supabase = createClient();
         const { error: uploadError } = await supabase.storage
           .from('originals')
-          .upload(storagePath, f.file, {
-            contentType: f.file.type || 'application/octet-stream',
-            upsert: false,
-          });
+          .upload(storagePath, f.file, { contentType, upsert: false });
 
         if (uploadError) {
           updateFile(f.id, { status: 'error', error: uploadError.message });
           return;
         }
-        updateFile(f.id, { progress: 100 });
+        updateFile(f.id, { progress: 97 });
       }
 
-      // Step 2: Register the media item and trigger processing via API
+      // Register the media item
       const res = await fetch('/api/upload/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -160,7 +140,7 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
           mediaId,
           collectionId,
           filename: f.file.name,
-          contentType: f.file.type || 'application/octet-stream',
+          contentType,
           fileSize: f.file.size,
           storagePath,
         }),
@@ -172,9 +152,9 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
         return;
       }
 
-      updateFile(f.id, { status: 'processing', mediaId });
+      updateFile(f.id, { status: 'processing', progress: 100, mediaId });
 
-      // Step 3: Trigger processing (separate request with long timeout)
+      // Trigger processing
       const processRes = await fetch('/api/media/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -188,11 +168,11 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
           error: result.error || undefined,
         });
       } else {
-        // Processing failed but file is uploaded — mark as done anyway
+        // Processing failed but file is uploaded
         updateFile(f.id, { status: 'done' });
       }
     } catch (err) {
-      const msg = err instanceof Error ? `Error: ${err.message}` : 'Network error — check connection';
+      const msg = err instanceof Error ? err.message : 'Network error — check connection';
       updateFile(f.id, { status: 'error', error: msg });
     }
   };
@@ -202,7 +182,6 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
     if (!queued.length) return;
     setUploading(true);
 
-    // Process files with concurrent workers (3 at a time)
     const queue = [...queued];
     const workers = Array.from({ length: Math.min(CONCURRENT_UPLOADS, queue.length) }, async () => {
       while (queue.length > 0) {
@@ -212,11 +191,9 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
     });
 
     await Promise.all(workers);
-
     setUploading(false);
     onUploadComplete();
 
-    // Mark processing items as done after a delay
     setTimeout(() => {
       setFiles((prev) =>
         prev.map((f) => (f.status === 'processing' ? { ...f, status: 'done' as const } : f))
@@ -224,17 +201,11 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
     }, 5000);
   };
 
-  const removeFile = (id: string) => {
-    setFiles((prev) => prev.filter((f) => f.id !== id));
-  };
-
-  const clearCompleted = () => {
-    setFiles((prev) => prev.filter((f) => f.status !== 'done'));
-  };
-
-  const retryFailed = () => {
-    setFiles((prev) => prev.map((f) => f.status === 'error' ? { ...f, status: 'queued' as const, error: undefined, progress: undefined } : f));
-  };
+  const removeFile = (id: string) => setFiles((prev) => prev.filter((f) => f.id !== id));
+  const clearCompleted = () => setFiles((prev) => prev.filter((f) => f.status !== 'done'));
+  const retryFailed = () => setFiles((prev) => prev.map((f) =>
+    f.status === 'error' ? { ...f, status: 'queued' as const, error: undefined, progress: undefined } : f
+  ));
 
   const queuedCount = files.filter((f) => f.status === 'queued').length;
   const uploadingCount = files.filter((f) => f.status === 'uploading' || f.status === 'processing').length;
@@ -276,7 +247,6 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
       {/* File list */}
       {files.length > 0 && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
-          {/* Summary bar */}
           <div className="flex items-center justify-between text-xs text-zinc-400">
             <div className="flex gap-4">
               <span>{files.length} file{files.length !== 1 ? 's' : ''}</span>
@@ -300,7 +270,6 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
             </div>
           </div>
 
-          {/* File rows */}
           <div className="max-h-64 overflow-y-auto space-y-1">
             {files.map((f) => (
               <div key={f.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-zinc-950/50">
@@ -330,7 +299,6 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
             ))}
           </div>
 
-          {/* Upload button */}
           {queuedCount > 0 && (
             <button
               onClick={handleUpload}
@@ -348,17 +316,11 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
 
 function StatusIcon({ status }: { status: string }) {
   switch (status) {
-    case 'queued':
-      return <span className="w-2 h-2 rounded-full bg-zinc-500 shrink-0" />;
-    case 'uploading':
-      return <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse shrink-0" />;
-    case 'processing':
-      return <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />;
-    case 'done':
-      return <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />;
-    case 'error':
-      return <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />;
-    default:
-      return <span className="w-2 h-2 rounded-full bg-zinc-700 shrink-0" />;
+    case 'queued': return <span className="w-2 h-2 rounded-full bg-zinc-500 shrink-0" />;
+    case 'uploading': return <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse shrink-0" />;
+    case 'processing': return <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />;
+    case 'done': return <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />;
+    case 'error': return <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />;
+    default: return <span className="w-2 h-2 rounded-full bg-zinc-700 shrink-0" />;
   }
 }

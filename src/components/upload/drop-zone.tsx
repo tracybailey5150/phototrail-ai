@@ -91,11 +91,12 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
         const totalChunks = Math.ceil(f.file.size / CHUNK_SIZE);
         const uploadId = mediaId;
 
+        // Step 1: Upload all chunks
         for (let i = 0; i < totalChunks; i++) {
           const start = i * CHUNK_SIZE;
           const end = Math.min(start + CHUNK_SIZE, f.file.size);
           const chunk = f.file.slice(start, end);
-          const pct = Math.round((end / f.file.size) * 100);
+          const pct = Math.round((end / f.file.size) * 90); // 0-90% for chunks
 
           updateFile(f.id, { progress: pct });
 
@@ -105,7 +106,6 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
           formData.append('totalChunks', String(totalChunks));
           formData.append('uploadId', uploadId);
           formData.append('storagePath', storagePath);
-          formData.append('contentType', f.file.type || 'application/octet-stream');
 
           const chunkRes = await uploadChunkWithRetry(formData);
           if (!chunkRes.ok) {
@@ -113,11 +113,25 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
             updateFile(f.id, { status: 'error', error: `Chunk ${i + 1}/${totalChunks}: ${err.error}` });
             return;
           }
+        }
 
-          // On last chunk, the server merges — this may take extra time
-          if (i === totalChunks - 1) {
-            updateFile(f.id, { progress: 99 });
-          }
+        // Step 2: Merge chunks server-side (separate request with long timeout)
+        updateFile(f.id, { progress: 92 });
+        const mergeRes = await fetch('/api/upload/merge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uploadId,
+            totalChunks,
+            storagePath,
+            contentType: f.file.type || 'application/octet-stream',
+          }),
+        });
+
+        if (!mergeRes.ok) {
+          const err = await mergeRes.json().catch(() => ({ error: 'Merge failed' }));
+          updateFile(f.id, { status: 'error', error: `Merge: ${err.error}` });
+          return;
         }
         updateFile(f.id, { progress: 100 });
       } else {

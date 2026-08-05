@@ -21,9 +21,7 @@ interface UploadFile {
 const ACCEPTED = '.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.bmp,.tiff,.mp4,.mov,.avi,.webm';
 const CONCURRENT_UPLOADS = 3;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-// Extract project ID from URL: https://xxxxx.supabase.co → xxxxx
-const PROJECT_ID = SUPABASE_URL.replace('https://', '').split('.')[0];
-const TUS_ENDPOINT = `https://${PROJECT_ID}.supabase.co/storage/v1/upload/resumable`;
+const TUS_ENDPOINT = `${SUPABASE_URL}/storage/v1/upload/resumable`;
 
 // Use TUS resumable upload for files over 5MB, direct upload for small files
 const RESUMABLE_THRESHOLD = 5 * 1024 * 1024;

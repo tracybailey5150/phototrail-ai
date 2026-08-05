@@ -47,45 +47,18 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
     setFiles((prev) => prev.map((x) => x.id === id ? { ...x, ...updates } : x));
   };
 
-  // Upload using XMLHttpRequest with FormData (matching Supabase signed URL format)
-  function uploadWithProgress(url: string, file: File, token: string, storagePath: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          const pct = Math.round((e.loaded / e.total) * 95);
-          setFiles((prev) => prev.map((f) =>
-            f.status === 'uploading' && f.file === file
-              ? { ...f, progress: pct }
-              : f
-          ));
-        }
+  // Upload large file using Supabase client's uploadToSignedUrl
+  async function uploadToSigned(storagePath: string, token: string, file: File, fileId: string): Promise<void> {
+    const supabase = createClient();
+    const { error } = await supabase.storage
+      .from('originals')
+      .uploadToSignedUrl(storagePath, token, file, {
+        upsert: true,
       });
 
-      xhr.addEventListener('load', () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve();
-        } else {
-          reject(new Error(`Upload failed: ${xhr.status} ${xhr.responseText?.substring(0, 200) || xhr.statusText}`));
-        }
-      });
-
-      xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
-      xhr.addEventListener('timeout', () => reject(new Error('Upload timed out')));
-      xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
-
-      // Supabase signed URL expects FormData with the file appended
-      const formData = new FormData();
-      formData.append('cacheControl', '3600');
-      formData.append('', file);
-
-      // signedUrl already contains the token as a query param
-      xhr.open('PUT', url);
-      xhr.setRequestHeader('x-upsert', 'true');
-      xhr.timeout = 600000; // 10 minute timeout
-      xhr.send(formData);
-    });
+    if (error) {
+      throw new Error(error.message);
+    }
   }
 
   const uploadOne = async (f: UploadFile): Promise<void> => {
@@ -111,10 +84,11 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
           return;
         }
 
-        const { signedUrl, token } = await signedRes.json();
+        const { token } = await signedRes.json();
 
-        // Upload directly with XHR for real progress (FormData format for Supabase)
-        await uploadWithProgress(signedUrl, f.file, token, storagePath);
+        // Upload directly via Supabase client's signed URL method
+        updateFile(f.id, { progress: 50 });
+        await uploadToSigned(storagePath, token, f.file, f.id);
         updateFile(f.id, { progress: 97 });
 
       } else {

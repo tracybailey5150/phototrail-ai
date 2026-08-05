@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState, useRef } from 'react';
+import * as tus from 'tus-js-client';
 import { createClient } from '@/lib/supabase/client';
 
 interface DropZoneProps {
@@ -19,8 +20,13 @@ interface UploadFile {
 
 const ACCEPTED = '.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.bmp,.tiff,.mp4,.mov,.avi,.webm';
 const CONCURRENT_UPLOADS = 3;
-// Files over this size use signed URL upload (direct to Supabase storage, no size limit)
-const SIGNED_URL_THRESHOLD = 4 * 1024 * 1024; // 4MB
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+// Extract project ID from URL: https://xxxxx.supabase.co → xxxxx
+const PROJECT_ID = SUPABASE_URL.replace('https://', '').split('.')[0];
+const TUS_ENDPOINT = `https://${PROJECT_ID}.supabase.co/storage/v1/upload/resumable`;
+
+// Use TUS resumable upload for files over 5MB, direct upload for small files
+const RESUMABLE_THRESHOLD = 5 * 1024 * 1024;
 
 export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -47,18 +53,49 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
     setFiles((prev) => prev.map((x) => x.id === id ? { ...x, ...updates } : x));
   };
 
-  // Upload large file using Supabase client's uploadToSignedUrl
-  async function uploadToSigned(storagePath: string, token: string, file: File, fileId: string): Promise<void> {
+  // TUS resumable upload — handles any file size, auto-retries, resumes on failure
+  async function tusUpload(file: File, storagePath: string, fileId: string): Promise<void> {
     const supabase = createClient();
-    const { error } = await supabase.storage
-      .from('originals')
-      .uploadToSignedUrl(storagePath, token, file, {
-        upsert: true,
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    return new Promise((resolve, reject) => {
+      const upload = new tus.Upload(file, {
+        endpoint: TUS_ENDPOINT,
+        retryDelays: [0, 1000, 3000, 5000, 10000, 20000],
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          'x-upsert': 'true',
+        },
+        uploadDataDuringCreation: true,
+        removeFingerprintOnSuccess: true,
+        metadata: {
+          bucketName: 'originals',
+          objectName: storagePath,
+          contentType: file.type || 'application/octet-stream',
+          cacheControl: '3600',
+        },
+        chunkSize: 6 * 1024 * 1024, // 6MB required by Supabase
+        onError: (error) => {
+          reject(new Error(error.message || 'Upload failed'));
+        },
+        onProgress: (bytesUploaded, bytesTotal) => {
+          const pct = Math.round((bytesUploaded / bytesTotal) * 95); // 0-95%
+          updateFile(fileId, { progress: pct });
+        },
+        onSuccess: () => {
+          resolve();
+        },
       });
 
-    if (error) {
-      throw new Error(error.message);
-    }
+      // Check for previous uploads to resume
+      upload.findPreviousUploads().then((previousUploads) => {
+        if (previousUploads.length) {
+          upload.resumeFromPreviousUpload(previousUploads[0]);
+        }
+        upload.start();
+      });
+    });
   }
 
   const uploadOne = async (f: UploadFile): Promise<void> => {
@@ -70,27 +107,9 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
       const storagePath = `uploads/${collectionId}/${mediaId}.${ext}`;
       const contentType = f.file.type || 'application/octet-stream';
 
-      if (f.file.size > SIGNED_URL_THRESHOLD) {
-        // Large file — get a signed URL and upload directly to Supabase storage
-        const signedRes = await fetch('/api/upload/signed-url', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ storagePath }),
-        });
-
-        if (!signedRes.ok) {
-          const err = await signedRes.json().catch(() => ({ error: 'Failed to get upload URL' }));
-          updateFile(f.id, { status: 'error', error: err.error });
-          return;
-        }
-
-        const { token } = await signedRes.json();
-
-        // Upload directly via Supabase client's signed URL method
-        updateFile(f.id, { progress: 50 });
-        await uploadToSigned(storagePath, token, f.file, f.id);
-        updateFile(f.id, { progress: 97 });
-
+      if (f.file.size > RESUMABLE_THRESHOLD) {
+        // Large file — TUS resumable upload (no size limit, auto-retry, resume on failure)
+        await tusUpload(f.file, storagePath, f.id);
       } else {
         // Small file — direct Supabase client upload
         updateFile(f.id, { progress: 50 });
@@ -103,8 +122,9 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
           updateFile(f.id, { status: 'error', error: uploadError.message });
           return;
         }
-        updateFile(f.id, { progress: 97 });
       }
+
+      updateFile(f.id, { progress: 97 });
 
       // Register the media item
       const res = await fetch('/api/upload/register', {
@@ -142,7 +162,6 @@ export function DropZone({ collectionId, onUploadComplete }: DropZoneProps) {
           error: result.error || undefined,
         });
       } else {
-        // Processing failed but file is uploaded
         updateFile(f.id, { status: 'done' });
       }
     } catch (err) {

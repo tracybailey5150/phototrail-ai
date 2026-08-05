@@ -19,8 +19,8 @@ interface UploadFile {
 
 const ACCEPTED = '.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.bmp,.tiff,.mp4,.mov,.avi,.webm';
 const CONCURRENT_UPLOADS = 3;
-const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
-const CHUNK_THRESHOLD = 8 * 1024 * 1024; // Files over 8MB use chunked upload (mobile-friendly)
+const CHUNK_SIZE = 3 * 1024 * 1024; // 3MB chunks (under Vercel 4.5MB body limit with FormData overhead)
+const CHUNK_THRESHOLD = 6 * 1024 * 1024; // Files over 6MB use chunked upload (mobile-friendly)
 const MAX_CHUNK_RETRIES = 3;
 
 async function uploadChunkWithRetry(

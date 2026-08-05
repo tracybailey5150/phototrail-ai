@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
-// Receives a chunk of a file and appends it to a temp file in storage
+// Receives a chunk of a file and stores it — merge happens in separate endpoint
 export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -40,37 +40,58 @@ export async function POST(request: Request) {
 
   // If this is the last chunk, merge all chunks
   if (chunkIndex === totalChunks - 1) {
+    // Download and merge all chunks
     const chunks: Buffer[] = [];
     for (let i = 0; i < totalChunks; i++) {
       const cPath = `chunks/${uploadId}/chunk_${String(i).padStart(5, '0')}`;
-      const { data: chunkData, error: dlError } = await admin.storage
-        .from('originals')
-        .download(cPath);
 
-      if (dlError || !chunkData) {
-        return NextResponse.json({ error: `Failed to read chunk ${i}` }, { status: 500 });
+      // Retry each chunk download up to 3 times
+      let chunkData: Blob | null = null;
+      let dlError: unknown = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const result = await admin.storage.from('originals').download(cPath);
+        if (result.data && !result.error) {
+          chunkData = result.data;
+          dlError = null;
+          break;
+        }
+        dlError = result.error;
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+      }
+
+      if (!chunkData || dlError) {
+        return NextResponse.json({ error: `Failed to read chunk ${i} during merge` }, { status: 500 });
       }
       chunks.push(Buffer.from(await chunkData.arrayBuffer()));
     }
 
     // Merge and upload final file
     const merged = Buffer.concat(chunks);
-    const { error: mergeError } = await admin.storage
-      .from('originals')
-      .upload(storagePath, new Uint8Array(merged), {
+
+    // Retry the final upload up to 3 times
+    let mergeError: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await admin.storage.from('originals').upload(storagePath, new Uint8Array(merged), {
         contentType: contentType || 'application/octet-stream',
         upsert: true,
       });
-
-    if (mergeError) {
-      return NextResponse.json({ error: `Merge failed: ${mergeError.message}` }, { status: 500 });
+      if (!result.error) {
+        mergeError = null;
+        break;
+      }
+      mergeError = result.error;
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
     }
 
-    // Clean up chunks
+    if (mergeError) {
+      return NextResponse.json({ error: `Merge failed: ${(mergeError as Error).message}` }, { status: 500 });
+    }
+
+    // Clean up chunks (fire and forget — don't fail if cleanup fails)
     const chunkPaths = Array.from({ length: totalChunks }, (_, i) =>
       `chunks/${uploadId}/chunk_${String(i).padStart(5, '0')}`
     );
-    await admin.storage.from('originals').remove(chunkPaths);
+    admin.storage.from('originals').remove(chunkPaths).catch(() => {});
 
     return NextResponse.json({ ok: true, merged: true, size: merged.length });
   }
